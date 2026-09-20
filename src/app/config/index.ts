@@ -8,7 +8,6 @@ const MIN_SECRET_LENGTH = 32
 const secret = (name: string) =>
   z.string().min(MIN_SECRET_LENGTH, `${name} must be at least ${MIN_SECRET_LENGTH} characters`)
 
-
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   PORT: z.coerce.number().int().positive().default(DEFAULT_PORT),
@@ -24,7 +23,7 @@ const envSchema = z.object({
   SSLCOMMERZ_STORE_PASSWORD: z.string().optional(),
   GOOGLE_CLIENT_ID: z.string().optional(),
   GOOGLE_CLIENT_SECRET: z.string().optional(),
-  CLOUDINARY_URL: z.string().url('CLOUDINARY_URL must be a valid URL')
+  CLOUDINARY_URL: z.string().url('CLOUDINARY_URL must be a valid URL'),
 })
 
 const parsed = envSchema.safeParse(process.env)
