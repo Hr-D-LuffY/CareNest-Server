@@ -1,6 +1,11 @@
 import cookieParser from "cookie-parser";
 import cors from "cors";
-import express from "express";
+import express, {
+  type Application,
+  type NextFunction,
+  type Request,
+  type Response,
+} from "express";
 import httpStatus from "http-status";
 
 const app = express();
@@ -10,7 +15,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 
-app.get("/health", (req, res) => {
+app.get("/health", (_req: Request, res: Response) => {
   res.status(httpStatus.OK).json({
     success: true,
     statusCode: httpStatus.OK,
@@ -19,11 +24,12 @@ app.get("/health", (req, res) => {
   });
 });
 
-app.get("/", (_req, res) => {
+app.get("/", (_req: Request, res: Response) => {
   res.status(httpStatus.OK).json({
     success: true,
     statusCode: httpStatus.OK,
     message: "Welcome to CareNest-Trusted care for your little ones",
+    data: {},
   });
 });
 

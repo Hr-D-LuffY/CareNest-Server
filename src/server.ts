@@ -1,7 +1,6 @@
 import app from './app'
+import { config } from './app/config'
 
-const DEFAULT_PORT = 5000
-
-app.listen(DEFAULT_PORT, () => {
-  console.log(`CareNest server listening on port ${DEFAULT_PORT}`)
+app.listen(config.port, () => {
+  console.log(`CareNest server listening on port ${config.port}`)
 })
