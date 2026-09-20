@@ -30,5 +30,14 @@ export const refreshTokenBodySchema = z.object({
   refreshToken: z.string().min(1).optional(),
 })
 
+// `idToken` is the Google ID token (JWT) the client obtained from Google Sign-In. `phone` and
+// `address` are only used when this login creates a new guardian account.
+export const googleLoginSchema = z.object({
+  idToken: z.string().min(1, 'Google ID token is required'),
+  phone: z.string().trim().min(1).optional(),
+  address: z.string().trim().min(1).optional(),
+})
+
 export type RegisterPayload = z.infer<typeof registerSchema>
+export type GoogleLoginPayload = z.infer<typeof googleLoginSchema>
 export type LoginPayload = z.infer<typeof loginSchema>

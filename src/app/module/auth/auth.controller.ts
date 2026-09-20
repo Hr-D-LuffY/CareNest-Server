@@ -5,7 +5,12 @@ import { config } from '../../config'
 import { catchAsync } from '../../utils/catchAsync'
 import { ACCESS_TOKEN_COOKIE, getTokenTtlMs, REFRESH_TOKEN_COOKIE } from '../../utils/jwt'
 import { sendResponse } from '../../utils/sendResponse'
-import { loginSchema, refreshTokenBodySchema, registerSchema } from './auth.interface'
+import {
+  googleLoginSchema,
+  loginSchema,
+  refreshTokenBodySchema,
+  registerSchema,
+} from './auth.interface'
 import { AuthService } from './auth.service'
 
 const baseCookieOptions: CookieOptions = {
@@ -55,6 +60,19 @@ const login = catchAsync(async (req, res) => {
   })
 })
 
+const googleLogin = catchAsync(async (req, res) => {
+  const payload = googleLoginSchema.parse(req.body)
+  const { accessToken, refreshToken, user } = await AuthService.googleLogin(payload)
+
+  setAuthCookies(res, { accessToken, refreshToken })
+
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    message: 'Logged in with Google successfully',
+    data: { accessToken, refreshToken, user },
+  })
+})
+
 const refreshToken = catchAsync(async (req, res) => {
   const tokens = await AuthService.refreshTokens(getRefreshToken(req))
 
@@ -80,4 +98,4 @@ const logout = catchAsync(async (req, res) => {
   })
 })
 
-export const AuthController = { register, login, refreshToken, logout }
+export const AuthController = { register, login, googleLogin, refreshToken, logout }

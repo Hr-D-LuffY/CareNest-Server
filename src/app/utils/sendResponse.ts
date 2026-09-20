@@ -13,13 +13,13 @@ interface SendResponseOptions<T> {
   meta?: PaginationMeta
 }
 
-// The only place a success envelope is built: { success, statusCode, message, data, meta? }
+// The only place a success envelope is built: { success, message, data, meta? }
+// The status code goes on the HTTP response itself, not into the body (assignment spec).
 export const sendResponse = <T>(res: Response, options: SendResponseOptions<T>) => {
   const { statusCode, message, data, meta } = options
 
   res.status(statusCode).json({
     success: true,
-    statusCode,
     message,
     data,
     ...(meta && { meta }),

@@ -5,6 +5,7 @@ const router = Router()
 
 router.post('/register', AuthController.register)
 router.post('/login', AuthController.login)
+router.post('/google', AuthController.googleLogin)
 router.post('/refresh-token', AuthController.refreshToken)
 router.post('/logout', AuthController.logout)
 

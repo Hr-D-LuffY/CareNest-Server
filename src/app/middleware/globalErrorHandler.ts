@@ -84,20 +84,16 @@ const normalizeError = (error: unknown): NormalizedError => {
   }
 }
 
-// The only place an error envelope is built: { success, statusCode, message, errors, stack? }
+// The only place an error envelope is built: { success, message, errors }
+// The status code goes on the HTTP response itself, and stack traces stay in the server log
+// so the body always matches the assignment's error shape.
 // Express identifies error middleware by its 4-argument signature, so `_next` must stay.
 export const globalErrorHandler: ErrorRequestHandler = (error, _req, res, _next) => {
   const { statusCode, message, errors } = normalizeError(error)
 
-  if (statusCode >= httpStatus.INTERNAL_SERVER_ERROR) {
+  if (statusCode >= httpStatus.INTERNAL_SERVER_ERROR || config.isDevelopment) {
     console.error(error)
   }
 
-  res.status(statusCode).json({
-    success: false,
-    statusCode,
-    message,
-    errors,
-    ...(config.isDevelopment && error instanceof Error && { stack: error.stack }),
-  })
+  res.status(statusCode).json({ success: false, message, errors })
 }

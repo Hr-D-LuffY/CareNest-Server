@@ -1,4 +1,5 @@
 import bcrypt from 'bcryptjs'
+import { OAuth2Client } from 'google-auth-library'
 import httpStatus from 'http-status'
 import { Role } from '../../../generated/prisma/enums'
 import { config } from '../../config'
@@ -11,10 +12,21 @@ import {
   type TokenPayload,
   verifyRefreshToken,
 } from '../../utils/jwt'
-import type { LoginPayload, RegisterPayload } from './auth.interface'
+import type { GoogleLoginPayload, LoginPayload, RegisterPayload } from './auth.interface'
 
 const INVALID_CREDENTIALS_MESSAGE = 'Invalid email or password'
 const INVALID_REFRESH_TOKEN_MESSAGE = 'Invalid or expired refresh token'
+const INVALID_GOOGLE_TOKEN_MESSAGE = 'Invalid Google token'
+
+const googleClient = new OAuth2Client()
+
+type SessionUser = {
+  id: string
+  name: string
+  email: string
+  role: TokenPayload['role']
+  profilePhoto: string | null
+}
 
 const signTokenPair = (user: { id: string; email: string; role: TokenPayload['role'] }) => {
   const payload: TokenPayload = { userId: user.id, email: user.email, role: user.role }
@@ -77,6 +89,11 @@ const loginUser = async ({ email, password }: LoginPayload) => {
     throw new AppError(httpStatus.UNAUTHORIZED, INVALID_CREDENTIALS_MESSAGE)
   }
 
+  return startSession(user)
+}
+
+// Shared by password and Google login: issue a token pair and store the refresh-token hash.
+const startSession = async (user: SessionUser) => {
   const { accessToken, refreshToken } = signTokenPair(user)
 
   await prisma.user.update({
@@ -95,6 +112,84 @@ const loginUser = async ({ email, password }: LoginPayload) => {
       profilePhoto: user.profilePhoto,
     },
   }
+}
+
+const verifyGoogleIdToken = async (idToken: string) => {
+  const { clientId } = config.google
+  if (!clientId) {
+    throw new AppError(httpStatus.SERVICE_UNAVAILABLE, 'Google login is not configured')
+  }
+
+  try {
+    const ticket = await googleClient.verifyIdToken({ idToken, audience: clientId })
+    const claims = ticket.getPayload()
+    if (claims?.sub && claims.email) {
+      return {
+        googleId: claims.sub,
+        email: claims.email.toLowerCase(),
+        emailVerified: claims.email_verified === true,
+        name: claims.name ?? claims.email,
+        picture: claims.picture ?? null,
+      }
+    }
+  } catch {
+    // fall through: any verification failure is the same 401 to the caller
+  }
+  throw new AppError(httpStatus.UNAUTHORIZED, INVALID_GOOGLE_TOKEN_MESSAGE)
+}
+
+// Sign in with Google. Returning Google users match on googleId; an existing password account
+// with the same (Google-verified) email gets the Google identity linked; anyone else becomes a
+// new GUARDIAN — Google login never creates staff or admin accounts.
+const googleLogin = async ({ idToken, phone, address }: GoogleLoginPayload) => {
+  const google = await verifyGoogleIdToken(idToken)
+  if (!google.emailVerified) {
+    throw new AppError(httpStatus.UNAUTHORIZED, 'Google account email is not verified')
+  }
+
+  const byGoogleId = await prisma.user.findUnique({ where: { googleId: google.googleId } })
+  const user = byGoogleId ?? (await findOrCreateByEmail(google, { phone, address }))
+
+  if (user.isDeleted) {
+    throw new AppError(httpStatus.UNAUTHORIZED, INVALID_GOOGLE_TOKEN_MESSAGE)
+  }
+
+  return startSession(user)
+}
+
+const findOrCreateByEmail = async (
+  google: Awaited<ReturnType<typeof verifyGoogleIdToken>>,
+  { phone, address }: Pick<GoogleLoginPayload, 'phone' | 'address'>,
+) => {
+  const existing = await prisma.user.findUnique({ where: { email: google.email } })
+  if (existing) {
+    if (existing.googleId && existing.googleId !== google.googleId) {
+      throw new AppError(httpStatus.CONFLICT, 'This email is linked to a different Google account')
+    }
+    if (existing.isDeleted || existing.googleId) return existing
+    return prisma.user.update({
+      where: { id: existing.id },
+      data: { googleId: google.googleId, profilePhoto: existing.profilePhoto ?? google.picture },
+    })
+  }
+
+  // GuardianProfile.phone is required, so a brand-new Google user must supply it.
+  if (!phone) {
+    throw new AppError(httpStatus.BAD_REQUEST, 'Phone is required to create a new account', [
+      { path: 'phone', message: 'Phone is required for first-time Google sign-in' },
+    ])
+  }
+
+  return prisma.user.create({
+    data: {
+      name: google.name,
+      email: google.email,
+      googleId: google.googleId,
+      role: Role.GUARDIAN,
+      profilePhoto: google.picture,
+      guardianProfile: { create: { phone, address } },
+    },
+  })
 }
 
 // Rotation: every refresh issues a brand-new pair and invalidates the old refresh token.
@@ -149,4 +244,4 @@ const logoutUser = async (token: string | undefined) => {
   })
 }
 
-export const AuthService = { registerUser, loginUser, refreshTokens, logoutUser }
+export const AuthService = { registerUser, loginUser, googleLogin, refreshTokens, logoutUser }
