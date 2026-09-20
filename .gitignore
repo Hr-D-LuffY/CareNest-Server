@@ -1,0 +1,18 @@
+node_modules
+dist
+
+# Keep environment variables out of version control
+.env
+
+# Prisma client output (recreated by `npx prisma generate`)
+/generated/prisma
+/src/generated/prisma
+
+# AI-tool skill folders (not uploaded)
+/.agents
+/.claude
+/.windsurf
+
+AGENTS.md
+CLAUDE.md
+childcare-platform-srs.md
