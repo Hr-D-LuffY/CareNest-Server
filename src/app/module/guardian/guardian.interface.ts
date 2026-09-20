@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { atLeastOneField } from '../../utils/validation'
 
 // Email and role are not editable here: email is the login identity and role is admin-managed.
 export const updateGuardianSchema = z
@@ -7,8 +8,6 @@ export const updateGuardianSchema = z
     phone: z.string().trim().min(1, 'Phone cannot be empty').optional(),
     address: z.string().trim().min(1, 'Address cannot be empty').nullable().optional(),
   })
-  .refine((value) => Object.values(value).some((field) => field !== undefined), {
-    message: 'Provide at least one field to update',
-  })
+  .refine(...atLeastOneField)
 
 export type UpdateGuardianPayload = z.infer<typeof updateGuardianSchema>

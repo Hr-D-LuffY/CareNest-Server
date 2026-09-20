@@ -4,9 +4,11 @@ import express, { type Request, type Response } from 'express'
 import httpStatus from 'http-status'
 import { globalErrorHandler } from './app/middleware/globalErrorHandler'
 import { notFound } from './app/middleware/notFound'
+import { AdminRoutes } from './app/module/admin/admin.route'
 import { AuthRoutes } from './app/module/auth/auth.route'
 import { ChildRoutes } from './app/module/child/child.route'
 import { GuardianRoutes } from './app/module/guardian/guardian.route'
+import { StaffRoutes } from './app/module/staff/staff.route'
 import { sendResponse } from './app/utils/sendResponse'
 
 const app = express()
@@ -35,6 +37,8 @@ app.get('/', (_req: Request, res: Response) => {
 app.use('/api/v1/auth', AuthRoutes)
 app.use('/api/v1/guardian', GuardianRoutes)
 app.use('/api/v1/child', ChildRoutes)
+app.use('/api/v1/staff', StaffRoutes)
+app.use('/api/v1/admin', AdminRoutes)
 
 app.use(notFound)
 app.use(globalErrorHandler)

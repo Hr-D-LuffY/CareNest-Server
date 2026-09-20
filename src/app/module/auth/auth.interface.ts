@@ -2,13 +2,15 @@ import { z } from 'zod'
 const MIN_PASSWORD_LENGTH = 8
 const MAX_PASSWORD_LENGTH = 72 // bcrypt ignores bytes past 72
 
+export const passwordSchema = z
+  .string()
+  .min(MIN_PASSWORD_LENGTH, `Password must be at least ${MIN_PASSWORD_LENGTH} characters`)
+  .max(MAX_PASSWORD_LENGTH, `Password must be at most ${MAX_PASSWORD_LENGTH} characters`)
+
 const baseFields = {
   name: z.string().trim().min(1, 'Name is required'),
   email: z.email('A valid email is required').toLowerCase(),
-  password: z
-    .string()
-    .min(MIN_PASSWORD_LENGTH, `Password must be at least ${MIN_PASSWORD_LENGTH} characters`)
-    .max(MAX_PASSWORD_LENGTH, `Password must be at most ${MAX_PASSWORD_LENGTH} characters`),
+  password: passwordSchema,
 }
 
 // Public registration is Guardian-only. There is no `role` field on purpose: staff accounts

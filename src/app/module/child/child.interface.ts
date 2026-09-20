@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { Tier } from '../../../generated/prisma/enums'
 import { paginationQueryShape } from '../../utils/pagination'
+import { atLeastOneField } from '../../utils/validation'
 
 const requiredText = (label: string) => z.string().trim().min(1, `${label} is required`)
 const optionalText = z.string().trim().min(1).nullable().optional()
@@ -22,9 +23,7 @@ export const createChildSchema = z.object(childFields)
 export const updateChildSchema = z
   .object(childFields)
   .partial()
-  .refine((value) => Object.values(value).some((field) => field !== undefined), {
-    message: 'Provide at least one field to update',
-  })
+  .refine(...atLeastOneField)
 
 export const listChildrenQuerySchema = z.object({
   ...paginationQueryShape,
