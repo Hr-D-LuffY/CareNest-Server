@@ -6,6 +6,9 @@ import { config } from '../config'
 
 const MS_PER_SECOND = 1000
 
+export const ACCESS_TOKEN_COOKIE = 'accessToken'
+export const REFRESH_TOKEN_COOKIE = 'refreshToken'
+
 export const tokenPayloadSchema = z.object({
   userId: z.string(),
   email: z.string(),

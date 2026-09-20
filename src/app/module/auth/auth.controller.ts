@@ -3,13 +3,10 @@ import httpStatus from 'http-status'
 import { z } from 'zod'
 import { config } from '../../config'
 import { catchAsync } from '../../utils/catchAsync'
-import { getTokenTtlMs } from '../../utils/jwt'
+import { ACCESS_TOKEN_COOKIE, getTokenTtlMs, REFRESH_TOKEN_COOKIE } from '../../utils/jwt'
 import { sendResponse } from '../../utils/sendResponse'
 import { loginSchema, refreshTokenBodySchema, registerSchema } from './auth.interface'
 import { AuthService } from './auth.service'
-
-const ACCESS_TOKEN_COOKIE = 'accessToken'
-const REFRESH_TOKEN_COOKIE = 'refreshToken'
 
 const baseCookieOptions: CookieOptions = {
   httpOnly: true,
