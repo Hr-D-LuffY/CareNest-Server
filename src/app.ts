@@ -5,6 +5,7 @@ import httpStatus from 'http-status'
 import { globalErrorHandler } from './app/middleware/globalErrorHandler'
 import { notFound } from './app/middleware/notFound'
 import { AuthRoutes } from './app/module/auth/auth.route'
+import { ChildRoutes } from './app/module/child/child.route'
 import { GuardianRoutes } from './app/module/guardian/guardian.route'
 import { sendResponse } from './app/utils/sendResponse'
 
@@ -33,6 +34,7 @@ app.get('/', (_req: Request, res: Response) => {
 
 app.use('/api/v1/auth', AuthRoutes)
 app.use('/api/v1/guardian', GuardianRoutes)
+app.use('/api/v1/child', ChildRoutes)
 
 app.use(notFound)
 app.use(globalErrorHandler)
