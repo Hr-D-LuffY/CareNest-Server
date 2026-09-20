@@ -4,6 +4,7 @@ import express, { type Request, type Response } from 'express'
 import httpStatus from 'http-status'
 import { globalErrorHandler } from './app/middleware/globalErrorHandler'
 import { notFound } from './app/middleware/notFound'
+import { AuthRoutes } from './app/module/auth/auth.route'
 import { sendResponse } from './app/utils/sendResponse'
 
 const app = express()
@@ -28,6 +29,8 @@ app.get('/', (_req: Request, res: Response) => {
     data: {},
   })
 })
+
+app.use('/api/v1/auth', AuthRoutes)
 
 app.use(notFound)
 app.use(globalErrorHandler)
