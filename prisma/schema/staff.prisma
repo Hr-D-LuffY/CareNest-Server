@@ -1,0 +1,48 @@
+model StaffProfile {
+  id     String @id @default(uuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id])
+
+  staffType  StaffType
+  bio        String?
+  experience Int       @default(0) // years
+
+  hourlyRate    Decimal? @db.Decimal(10, 2) // sitters (and BOTH)
+  perMinuteRate Decimal? @db.Decimal(10, 2) // drivers (and BOTH)
+
+  verificationStatus VerificationStatus @default(UNVERIFIED)
+  verifiedAt         DateTime?
+  rejectionReason    String?
+
+  isDeleted Boolean   @default(false)
+  deletedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  availabilitySlots AvailabilitySlot[]
+  vehicles          Vehicle[]
+  rooms             Room[]
+  checkinLogs       CheckinLog[]
+  transportBookings TransportBooking[]
+  ratings           Rating[]
+
+  @@map("staff_profiles")
+}
+
+// Weekly availability, used to validate whether staff can be assigned to a room's schedule
+model AvailabilitySlot {
+  id      String       @id @default(uuid())
+  staffId String
+  staff   StaffProfile @relation(fields: [staffId], references: [id])
+
+  dayOfWeek DayOfWeek
+  startTime String // "HH:mm", 24h
+  endTime   String // "HH:mm", 24h
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([staffId, dayOfWeek])
+  @@map("availability_slots")
+}

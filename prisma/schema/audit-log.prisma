@@ -1,0 +1,21 @@
+// Append-only: rows are inserted, never updated or deleted.
+model AuditLog {
+  id String @id @default(uuid())
+
+  // null for system-initiated actions (cron jobs, webhooks)
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id])
+
+  action   String // e.g. "STAFF_VERIFIED", "BOOKING_CANCELLED"
+  entity   String // e.g. "StaffProfile", "Booking"
+  entityId String?
+  metadata Json?
+
+  ipAddress String?
+
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([entity, entityId])
+  @@map("audit_logs")
+}

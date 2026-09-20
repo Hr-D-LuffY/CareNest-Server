@@ -1,0 +1,28 @@
+// Append-only ledger: rows are inserted, never updated or deleted.
+// `amount` is always positive; `type` decides whether it credits (TOPUP) or debits (fees, fares).
+model WalletTransaction {
+  id String @id @default(uuid())
+
+  guardianId String
+  guardian   GuardianProfile @relation(fields: [guardianId], references: [id])
+
+  type         WalletTransactionType
+  amount       Decimal               @db.Decimal(12, 2)
+  balanceAfter Decimal               @db.Decimal(12, 2)
+  description  String?
+
+  // what caused this entry
+  bookingId          String?
+  booking            Booking?          @relation(fields: [bookingId], references: [id])
+  transportBookingId String?
+  transportBooking   TransportBooking? @relation(fields: [transportBookingId], references: [id])
+
+  // unique: a payment can credit the wallet at most once (idempotent webhook)
+  paymentId String?  @unique
+  payment   Payment? @relation(fields: [paymentId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@index([guardianId, createdAt]) // history endpoint
+  @@map("wallet_transactions")
+}

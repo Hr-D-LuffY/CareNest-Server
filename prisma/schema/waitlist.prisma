@@ -1,0 +1,31 @@
+model WaitlistEntry {
+  id String @id @default(uuid())
+
+  roomId String
+  room   Room   @relation(fields: [roomId], references: [id])
+
+  childId String
+  child   Child  @relation(fields: [childId], references: [id])
+
+  guardianId String
+  guardian   GuardianProfile @relation(fields: [guardianId], references: [id])
+
+  // the session date this entry is queued for; the waitlist is per room per date
+  sessionDate DateTime @db.Date
+
+  status        WaitlistStatus @default(PENDING)
+  priorityScore Float          @default(0) // recomputed whenever the room's waitlist changes
+  joinedAt      DateTime       @default(now())
+  promotedAt    DateTime?
+
+  // the CONFIRMED booking created when this entry was promoted
+  bookingId String?  @unique
+  booking   Booking? @relation(fields: [bookingId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([roomId, sessionDate, status, priorityScore]) // promotion query
+  @@index([guardianId])
+  @@map("waitlist_entries")
+}

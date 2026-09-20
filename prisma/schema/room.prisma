@@ -1,0 +1,30 @@
+model Room {
+  id String @id @default(uuid())
+
+  name     String
+  tier     Tier
+  capacity Int
+
+  // weekly schedule window
+  dayOfWeek DayOfWeek
+  startTime String // "HH:mm", 24h
+  endTime   String // "HH:mm", 24h
+
+  // tierMultiplier in the fare formula: hoursUsed x hourlyRate x priceMultiplier
+  priceMultiplier Decimal @default(1) @db.Decimal(5, 2)
+
+  staffId String
+  staff   StaffProfile @relation(fields: [staffId], references: [id])
+
+  isDeleted Boolean   @default(false)
+  deletedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  bookings        Booking[]
+  waitlistEntries WaitlistEntry[]
+
+  @@index([staffId])
+  @@map("rooms")
+}

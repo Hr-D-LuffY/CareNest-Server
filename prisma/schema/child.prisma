@@ -1,0 +1,30 @@
+model Child {
+  id         String          @id @default(uuid())
+  guardianId String
+  guardian   GuardianProfile @relation(fields: [guardianId], references: [id])
+
+  name        String
+  dateOfBirth DateTime
+  tier        Tier
+
+  // medical info (SRS 4.2)
+  allergies             String?
+  conditions            String?
+  emergencyContactName  String
+  emergencyContactPhone String
+
+  profilePhoto         String? // Cloudinary secure_url, what the frontend displays
+  profilePhotoPublicId String? // needed later to delete or replace the old image
+
+  isDeleted Boolean   @default(false)
+  deletedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  bookings        Booking[]
+  waitlistEntries WaitlistEntry[]
+
+  @@index([guardianId])
+  @@map("children")
+}

@@ -1,0 +1,62 @@
+model Vehicle {
+  id String @id @default(uuid())
+
+  driverId String
+  driver   StaffProfile @relation(fields: [driverId], references: [id])
+
+  plateNumber String      @unique
+  capacity    Int
+  vehicleType VehicleType
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  transportBookings TransportBooking[]
+
+  @@index([driverId])
+  @@map("vehicles")
+}
+
+model TransportBooking {
+  id String @id @default(uuid())
+
+  bookingId String  @unique // at most one ride per booking
+  booking   Booking @relation(fields: [bookingId], references: [id])
+
+  driverId String
+  driver   StaffProfile @relation(fields: [driverId], references: [id])
+
+  vehicleId String
+  vehicle   Vehicle @relation(fields: [vehicleId], references: [id])
+
+  pickupAddress  String
+  dropoffAddress String
+  status         TransportStatus @default(REQUESTED)
+  baseFare       Decimal         @db.Decimal(10, 2)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tripLog            TripLog?
+  walletTransactions WalletTransaction[]
+
+  @@index([driverId, status])
+  @@map("transport_bookings")
+}
+
+model TripLog {
+  id String @id @default(uuid())
+
+  transportBookingId String           @unique
+  transportBooking   TransportBooking @relation(fields: [transportBookingId], references: [id])
+
+  tripStart       DateTime
+  tripEnd         DateTime?
+  durationMinutes Int?
+  fare            Decimal?  @db.Decimal(10, 2) // baseFare + durationMinutes x perMinuteRate
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("trip_logs")
+}

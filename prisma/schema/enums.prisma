@@ -1,0 +1,73 @@
+enum Role {
+  GUARDIAN
+  STAFF
+  ADMIN
+}
+
+enum StaffType {
+  SITTER
+  DRIVER
+  BOTH
+}
+
+enum VerificationStatus {
+  UNVERIFIED
+  VERIFIED
+  REJECTED
+}
+
+enum Tier {
+  DAILY
+  WEEKLY
+  MONTHLY
+}
+
+enum BookingStatus {
+  PENDING
+  CONFIRMED
+  CANCELLED
+  COMPLETED
+}
+
+enum WaitlistStatus {
+  PENDING
+  PROMOTED
+  EXPIRED
+  CANCELLED
+}
+
+enum WalletTransactionType {
+  TOPUP
+  CARE_FEE
+  TRANSPORT_FARE
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCESS
+  FAILED
+  CANCELLED
+}
+
+enum DayOfWeek {
+  MONDAY
+  TUESDAY
+  WEDNESDAY
+  THURSDAY
+  FRIDAY
+  SATURDAY
+  SUNDAY
+}
+
+enum VehicleType {
+  CAR
+  VAN
+  BUS
+}
+
+enum TransportStatus {
+  REQUESTED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}

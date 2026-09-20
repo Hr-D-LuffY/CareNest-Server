@@ -24,7 +24,7 @@ const envSchema = z.object({
   SSLCOMMERZ_STORE_PASSWORD: z.string().optional(),
   GOOGLE_CLIENT_ID: z.string().optional(),
   GOOGLE_CLIENT_SECRET: z.string().optional(),
-  CLOUDINARY_URL: z.string().optional(),
+  CLOUDINARY_URL: z.string().url('CLOUDINARY_URL must be a valid URL')
 })
 
 const parsed = envSchema.safeParse(process.env)

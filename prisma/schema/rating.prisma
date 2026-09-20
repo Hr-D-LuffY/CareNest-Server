@@ -1,0 +1,22 @@
+model Rating {
+  id String @id @default(uuid())
+
+  bookingId String
+  booking   Booking @relation(fields: [bookingId], references: [id])
+
+  // who is rated (sitter and/or driver) and who rated
+  staffId String
+  staff   StaffProfile @relation(fields: [staffId], references: [id])
+
+  guardianId String
+  guardian   GuardianProfile @relation(fields: [guardianId], references: [id])
+
+  score   Int // 1-5, range enforced by the Zod schema
+  comment String?
+
+  createdAt DateTime @default(now())
+
+  @@unique([bookingId, staffId]) // one rating per staff member per booking
+  @@index([staffId]) // AVG(score) per staff
+  @@map("ratings")
+}
