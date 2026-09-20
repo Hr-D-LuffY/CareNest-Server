@@ -1,9 +1,9 @@
-import type { CookieOptions, Request, Response } from 'express'
+import type { Request } from 'express'
 import httpStatus from 'http-status'
 import { z } from 'zod'
-import { config } from '../../config'
+import { clearAuthCookies, setAuthCookies } from '../../utils/authCookies'
 import { catchAsync } from '../../utils/catchAsync'
-import { ACCESS_TOKEN_COOKIE, getTokenTtlMs, REFRESH_TOKEN_COOKIE } from '../../utils/jwt'
+import { REFRESH_TOKEN_COOKIE } from '../../utils/jwt'
 import { sendResponse } from '../../utils/sendResponse'
 import {
   googleLoginSchema,
@@ -12,23 +12,6 @@ import {
   registerSchema,
 } from './auth.interface'
 import { AuthService } from './auth.service'
-
-const baseCookieOptions: CookieOptions = {
-  httpOnly: true,
-  secure: !config.isDevelopment,
-  sameSite: config.isDevelopment ? 'lax' : 'none',
-}
-
-const setAuthCookies = (res: Response, tokens: { accessToken: string; refreshToken: string }) => {
-  res.cookie(ACCESS_TOKEN_COOKIE, tokens.accessToken, {
-    ...baseCookieOptions,
-    maxAge: getTokenTtlMs(tokens.accessToken),
-  })
-  res.cookie(REFRESH_TOKEN_COOKIE, tokens.refreshToken, {
-    ...baseCookieOptions,
-    maxAge: getTokenTtlMs(tokens.refreshToken),
-  })
-}
 
 // Cookie first (browsers), request body second (Postman / mobile clients).
 const getRefreshToken = (req: Request): string | undefined => {
@@ -88,8 +71,7 @@ const refreshToken = catchAsync(async (req, res) => {
 const logout = catchAsync(async (req, res) => {
   await AuthService.logoutUser(getRefreshToken(req))
 
-  res.clearCookie(ACCESS_TOKEN_COOKIE, baseCookieOptions)
-  res.clearCookie(REFRESH_TOKEN_COOKIE, baseCookieOptions)
+  clearAuthCookies(res)
 
   sendResponse(res, {
     statusCode: httpStatus.OK,
