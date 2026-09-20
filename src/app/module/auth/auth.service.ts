@@ -4,10 +4,31 @@ import { Role } from '../../../generated/prisma/enums'
 import { config } from '../../config'
 import { AppError } from '../../errorHelpers/AppError'
 import { prisma } from '../../lib/prisma'
-import { hashToken, signAccessToken, signRefreshToken } from '../../utils/jwt'
+import {
+  hashToken,
+  signAccessToken,
+  signRefreshToken,
+  type TokenPayload,
+  verifyRefreshToken,
+} from '../../utils/jwt'
 import type { LoginPayload, RegisterPayload } from './auth.interface'
 
 const INVALID_CREDENTIALS_MESSAGE = 'Invalid email or password'
+const INVALID_REFRESH_TOKEN_MESSAGE = 'Invalid or expired refresh token'
+
+const signTokenPair = (user: { id: string; email: string; role: TokenPayload['role'] }) => {
+  const payload: TokenPayload = { userId: user.id, email: user.email, role: user.role }
+  return { accessToken: signAccessToken(payload), refreshToken: signRefreshToken(payload) }
+}
+
+// verifyRefreshToken throws jsonwebtoken / Zod errors; surface any of them as a clean 401.
+const verifyRefreshTokenOrThrow = (token: string) => {
+  try {
+    return verifyRefreshToken(token)
+  } catch {
+    throw new AppError(httpStatus.UNAUTHORIZED, INVALID_REFRESH_TOKEN_MESSAGE)
+  }
+}
 
 const publicUserSelect = {
   id: true,
@@ -56,9 +77,7 @@ const loginUser = async ({ email, password }: LoginPayload) => {
     throw new AppError(httpStatus.UNAUTHORIZED, INVALID_CREDENTIALS_MESSAGE)
   }
 
-  const tokenPayload = { userId: user.id, email: user.email, role: user.role }
-  const accessToken = signAccessToken(tokenPayload)
-  const refreshToken = signRefreshToken(tokenPayload)
+  const { accessToken, refreshToken } = signTokenPair(user)
 
   await prisma.user.update({
     where: { id: user.id },
@@ -78,4 +97,56 @@ const loginUser = async ({ email, password }: LoginPayload) => {
   }
 }
 
-export const AuthService = { registerUser, loginUser }
+// Rotation: every refresh issues a brand-new pair and invalidates the old refresh token.
+const refreshTokens = async (token: string | undefined) => {
+  if (!token) throw new AppError(httpStatus.UNAUTHORIZED, INVALID_REFRESH_TOKEN_MESSAGE)
+
+  const payload = verifyRefreshTokenOrThrow(token)
+  const user = await prisma.user.findUnique({ where: { id: payload.userId } })
+  if (!user || user.isDeleted || !user.refreshTokenHash) {
+    throw new AppError(httpStatus.UNAUTHORIZED, INVALID_REFRESH_TOKEN_MESSAGE)
+  }
+
+  const presentedHash = hashToken(token)
+  if (user.refreshTokenHash !== presentedHash) {
+    // A validly signed token that is no longer the current one was already rotated:
+    // treat it as possible theft and end the session so both parties must log in again.
+    await prisma.user.update({ where: { id: user.id }, data: { refreshTokenHash: null } })
+    throw new AppError(httpStatus.UNAUTHORIZED, INVALID_REFRESH_TOKEN_MESSAGE)
+  }
+
+  const { accessToken, refreshToken } = signTokenPair(user)
+
+  // Compare-and-swap on the old hash so two concurrent refreshes can't both succeed.
+  const rotated = await prisma.user.updateMany({
+    where: { id: user.id, refreshTokenHash: presentedHash },
+    data: { refreshTokenHash: hashToken(refreshToken) },
+  })
+  if (rotated.count === 0) {
+    throw new AppError(httpStatus.UNAUTHORIZED, INVALID_REFRESH_TOKEN_MESSAGE)
+  }
+
+  return { accessToken, refreshToken }
+}
+
+// Idempotent: a missing, expired or already-rotated token has nothing left to revoke, so
+// logout still succeeds and the controller clears the cookies either way.
+const logoutUser = async (token: string | undefined) => {
+  if (!token) return
+
+  let userId: string
+  try {
+    userId = verifyRefreshToken(token).userId
+  } catch {
+    return // unverifiable token cannot match a stored hash
+  }
+
+  // Only clears the session if this is still the current token, so a stale token from
+  // an old device can't log out the newer session.
+  await prisma.user.updateMany({
+    where: { id: userId, refreshTokenHash: hashToken(token) },
+    data: { refreshTokenHash: null },
+  })
+}
+
+export const AuthService = { registerUser, loginUser, refreshTokens, logoutUser }

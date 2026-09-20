@@ -24,5 +24,11 @@ export const loginSchema = z.object({
   password: z.string().min(1, 'Password is required'),
 })
 
+// The refresh token normally arrives as an httpOnly cookie; the body is the fallback for
+// non-browser clients (e.g. Postman, mobile).
+export const refreshTokenBodySchema = z.object({
+  refreshToken: z.string().min(1).optional(),
+})
+
 export type RegisterPayload = z.infer<typeof registerSchema>
 export type LoginPayload = z.infer<typeof loginSchema>
