@@ -23,15 +23,17 @@ export const updateMyStaffSchema = updateBodySchema(
 ).refine(...atLeastOneField)
 
 const TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/
-const END_AFTER_START_MESSAGE = 'End time must be after start time'
+export const END_AFTER_START_MESSAGE = 'End time must be after start time'
 
-const timeSchema = (label: string) =>
+export const timeSchema = (label: string) =>
   z.string().regex(TIME_PATTERN, `${label} must be 24h HH:mm, e.g. 09:30`)
 
+export const dayOfWeekSchema = z.enum(DayOfWeek, {
+  error: `Day of week must be one of: ${Object.values(DayOfWeek).join(', ')}`,
+})
+
 const slotFields = {
-  dayOfWeek: z.enum(DayOfWeek, {
-    error: `Day of week must be one of: ${Object.values(DayOfWeek).join(', ')}`,
-  }),
+  dayOfWeek: dayOfWeekSchema,
   startTime: timeSchema('Start time'),
   endTime: timeSchema('End time'),
 }

@@ -8,6 +8,7 @@ import { AdminRoutes } from './app/module/admin/admin.route'
 import { AuthRoutes } from './app/module/auth/auth.route'
 import { ChildRoutes } from './app/module/child/child.route'
 import { GuardianRoutes } from './app/module/guardian/guardian.route'
+import { RoomRoutes } from './app/module/room/room.route'
 import { StaffRoutes } from './app/module/staff/staff.route'
 import { sendResponse } from './app/utils/sendResponse'
 
@@ -37,6 +38,7 @@ app.get('/', (_req: Request, res: Response) => {
 app.use('/api/v1/auth', AuthRoutes)
 app.use('/api/v1/guardian', GuardianRoutes)
 app.use('/api/v1/child', ChildRoutes)
+app.use('/api/v1/room', RoomRoutes)
 app.use('/api/v1/staff', StaffRoutes)
 app.use('/api/v1/admin', AdminRoutes)
 
