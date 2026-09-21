@@ -3,7 +3,7 @@ import type { Prisma } from '../../../generated/prisma/client'
 import { BookingStatus, TransportStatus } from '../../../generated/prisma/enums'
 import { AppError } from '../../errorHelpers/AppError'
 import { ACTIVE_BOOKING_STATUSES, assertNotDoubleBooked, lockRow } from '../../lib/booking-guards'
-import { estimateCareFee } from '../../lib/fare.service'
+import { estimateCareFee, hoursElapsed } from '../../lib/fare.service'
 import { prisma } from '../../lib/prisma'
 import { toIsoDate } from '../../utils/date'
 import type { TokenPayload } from '../../utils/jwt'
@@ -15,6 +15,7 @@ import {
   toSessionDate,
   WEEKDAYS,
 } from '../room/room.service'
+import { getMySitterId } from '../staff/staff.service'
 import { joinWaitlist, promoteFromWaitlist } from '../waitlist/waitlist.service'
 import type { CreateBookingPayload } from './booking.interface'
 
@@ -23,6 +24,8 @@ type Caller = Pick<TokenPayload, 'userId'>
 const AUDIT_BOOKING_ENTITY = 'Booking'
 const AUDIT_BOOKING_CREATED = 'BOOKING_CREATED'
 const AUDIT_BOOKING_CANCELLED = 'BOOKING_CANCELLED'
+const AUDIT_BOOKING_CHECKED_IN = 'BOOKING_CHECKED_IN'
+const AUDIT_BOOKING_CHECKED_OUT = 'BOOKING_CHECKED_OUT'
 const BOOKING_NOT_FOUND_MESSAGE = 'Booking not found'
 
 const bookingSelect = {
@@ -190,4 +193,120 @@ const cancelBooking = async (caller: Caller, bookingId: string) => {
   return toBookingView(cancelled)
 }
 
-export const BookingService = { createBooking, cancelBooking }
+const checkinLogSelect = {
+  id: true,
+  checkInAt: true,
+  checkOutAt: true,
+  hoursUsed: true,
+  booking: { select: bookingSelect },
+} as const
+
+type CheckinLogRecord = Prisma.CheckinLogGetPayload<{ select: typeof checkinLogSelect }>
+
+const toCheckinLogView = ({ booking, ...log }: CheckinLogRecord) => ({
+  ...log,
+  booking: toBookingView(booking),
+})
+
+// Only the sitter running the booking's room may log it. Someone else's booking gets the same 404
+// as a missing one, so ids can't be probed.
+const findBookingInMyRoom = async (staffId: string, bookingId: string) => {
+  const booking = await prisma.booking.findFirst({
+    where: { id: bookingId, room: { staffId, isDeleted: false } },
+    select: {
+      id: true,
+      status: true,
+      sessionDate: true,
+      roomId: true,
+      checkinLog: { select: { checkInAt: true, checkOutAt: true } },
+    },
+  })
+  if (!booking) throw new AppError(httpStatus.NOT_FOUND, BOOKING_NOT_FOUND_MESSAGE)
+  if (booking.status !== BookingStatus.CONFIRMED) {
+    throw new AppError(httpStatus.CONFLICT, `A ${booking.status} booking cannot be logged`)
+  }
+  return booking
+}
+
+// Staff logs the actual arrival (SRS 4.8). Only on the session day, once per booking. The room lock
+// is the same one cancelBooking takes, so a cancellation and a check-in can't both succeed.
+const checkIn = async (caller: Caller, bookingId: string) => {
+  const staffId = await getMySitterId(caller)
+  const booking = await findBookingInMyRoom(staffId, bookingId)
+
+  if (booking.checkinLog) {
+    throw new AppError(httpStatus.CONFLICT, 'The child is already checked in for this booking')
+  }
+  if (booking.sessionDate.getTime() !== todayUtc().getTime()) {
+    throw new AppError(httpStatus.CONFLICT, 'Check-in is only possible on the session date')
+  }
+
+  const log = await prisma.$transaction(async (tx) => {
+    await lockRow(tx, 'rooms', booking.roomId)
+    const stillOpen = await tx.booking.findFirst({
+      where: { id: bookingId, status: BookingStatus.CONFIRMED, checkinLog: null },
+      select: { id: true },
+    })
+    if (!stillOpen) {
+      throw new AppError(httpStatus.CONFLICT, 'This booking can no longer be checked in')
+    }
+
+    const created = await tx.checkinLog.create({
+      data: { bookingId, staffId, checkInAt: new Date() },
+      select: checkinLogSelect,
+    })
+    await tx.auditLog.create({
+      data: {
+        userId: caller.userId,
+        action: AUDIT_BOOKING_CHECKED_IN,
+        entity: AUDIT_BOOKING_ENTITY,
+        entityId: bookingId,
+        metadata: { roomId: booking.roomId },
+      },
+    })
+    return created
+  })
+  return toCheckinLogView(log)
+}
+
+// Staff logs the actual departure: stamps `checkOutAt`, stores `hoursUsed` and completes the
+// booking (SRS 4.8). The conditional update on `checkOutAt: null` stops a double-click logging it
+// twice. The fare and wallet deduction are layered on in the next commit.
+const checkOut = async (caller: Caller, bookingId: string) => {
+  const staffId = await getMySitterId(caller)
+  const { checkinLog, roomId } = await findBookingInMyRoom(staffId, bookingId)
+
+  if (!checkinLog) {
+    throw new AppError(httpStatus.CONFLICT, 'The child has not been checked in yet')
+  }
+  if (checkinLog.checkOutAt) {
+    throw new AppError(httpStatus.CONFLICT, 'The child is already checked out for this booking')
+  }
+
+  const checkOutAt = new Date()
+  const hoursUsed = hoursElapsed(checkinLog.checkInAt, checkOutAt)
+  const log = await prisma.$transaction(async (tx) => {
+    const { count } = await tx.checkinLog.updateMany({
+      where: { bookingId, checkOutAt: null },
+      data: { checkOutAt, hoursUsed },
+    })
+    if (count === 0) {
+      throw new AppError(httpStatus.CONFLICT, 'This booking can no longer be checked out')
+    }
+
+    await tx.booking.update({ where: { id: bookingId }, data: { status: BookingStatus.COMPLETED } })
+    await tx.auditLog.create({
+      data: {
+        userId: caller.userId,
+        action: AUDIT_BOOKING_CHECKED_OUT,
+        entity: AUDIT_BOOKING_ENTITY,
+        entityId: bookingId,
+        metadata: { roomId, hoursUsed: hoursUsed.toString() },
+      },
+    })
+    return tx.checkinLog.findUniqueOrThrow({ where: { bookingId }, select: checkinLogSelect })
+  })
+  return toCheckinLogView(log)
+}
+
+export const BookingService = { createBooking, cancelBooking, checkIn, checkOut }

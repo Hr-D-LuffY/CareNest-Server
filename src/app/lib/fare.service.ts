@@ -35,6 +35,15 @@ export const estimateCareFee = ({ startTime, endTime, priceMultiplier, staff }: 
   })
 }
 
+const MS_PER_HOUR = MINUTES_PER_HOUR * 60 * 1000
+
+// Actual time between two instants in hours, to the cent-style precision `hoursUsed` is stored at
+// (e.g. 1h 30m -> 1.5). Never negative.
+export const hoursElapsed = (from: Date, to: Date) =>
+  new Prisma.Decimal(Math.max(0, to.getTime() - from.getTime()))
+    .div(MS_PER_HOUR)
+    .toDecimalPlaces(MONEY_DECIMAL_PLACES)
+
 const toMinutes = (time: string) => {
   const [hours = 0, minutes = 0] = time.split(':').map(Number)
   return hours * MINUTES_PER_HOUR + minutes

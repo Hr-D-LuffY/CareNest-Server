@@ -171,6 +171,10 @@ const getMyProfileOfType = async (caller: Caller, allowed: StaffType[], duty: st
   return staff
 }
 
+// The caller's staff profile id, for modules that act on the rooms a sitter runs (check-in/out).
+export const getMySitterId = async (caller: Caller) =>
+  (await getMyProfileOfType(caller, SITTER_TYPES, 'sitter')).id
+
 const bookingSelect = {
   id: true,
   sessionDate: true,
@@ -192,7 +196,7 @@ const bookingSelect = {
 
 // Confirmed bookings in this staff member's rooms that still need a check-in or a check-out.
 const listMyBookings = async (caller: Caller, query: ListMyBookingsQuery) => {
-  const { id: staffId } = await getMyProfileOfType(caller, SITTER_TYPES, 'sitter')
+  const staffId = await getMySitterId(caller)
   const where: Prisma.BookingWhereInput = {
     room: { staffId, isDeleted: false },
     status: BookingStatus.CONFIRMED,
