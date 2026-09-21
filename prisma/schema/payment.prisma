@@ -1,3 +1,6 @@
+// One row per bKash top-up attempt. A row is created PENDING when the guardian starts checkout and
+// only flips to SUCCESS after our own Execute/Query Payment call confirms it (never on the redirect
+// alone), which is also what credits the wallet.
 model Payment {
   id String @id @default(uuid())
 
@@ -8,11 +11,11 @@ model Payment {
   currency String        @default("BDT")
   status   PaymentStatus @default(PENDING)
 
-  // our tran_id sent to SSLCommerz; the gateway echoes it back on callback / IPN
-  transactionId     String  @unique
-  gatewaySessionKey String?
-  gatewayValId      String? // returned by the gateway, used to validate the payment
-  gatewayResponse   Json? // raw validation payload, kept for audit
+  // our merchantInvoiceNumber sent to bKash; unique so an invoice is never reused
+  transactionId    String  @unique
+  gatewayPaymentId String? @unique // bKash paymentID, returned by Create Payment; the callback looks the row up by it
+  gatewayTrxId     String? // bKash trxID, returned by Execute Payment once the money has moved
+  gatewayResponse  Json? // raw Execute/Query payload, kept for audit
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

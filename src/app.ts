@@ -9,6 +9,7 @@ import { AuthRoutes } from './app/module/auth/auth.route'
 import { BookingRoutes } from './app/module/booking/booking.route'
 import { ChildRoutes } from './app/module/child/child.route'
 import { GuardianRoutes } from './app/module/guardian/guardian.route'
+import { PaymentRoutes } from './app/module/payment/payment.route'
 import { RoomRoutes } from './app/module/room/room.route'
 import { StaffRoutes } from './app/module/staff/staff.route'
 import { WaitlistRoutes } from './app/module/waitlist/waitlist.route'
@@ -43,6 +44,7 @@ app.use('/api/v1/child', ChildRoutes)
 app.use('/api/v1/room', RoomRoutes)
 app.use('/api/v1/room', WaitlistRoutes)
 app.use('/api/v1/booking', BookingRoutes)
+app.use('/api/v1/payment', PaymentRoutes)
 app.use('/api/v1/staff', StaffRoutes)
 app.use('/api/v1/admin', AdminRoutes)
 
