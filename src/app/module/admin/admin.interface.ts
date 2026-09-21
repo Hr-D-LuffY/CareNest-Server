@@ -44,6 +44,29 @@ export const updateStaffSchema = updateBodySchema(
   .partial()
   .refine(...atLeastOneField)
 
+// Approve, or reject with a reason the staff member can act on. Each variant is strict so a
+// stray field (e.g. a reason on an approval) is reported instead of silently dropped.
+export const verifyStaffSchema = z.discriminatedUnion(
+  'status',
+  [
+    updateBodySchema(
+      { status: z.literal(VerificationStatus.VERIFIED) },
+      'Only status is accepted when verifying',
+    ),
+    updateBodySchema(
+      {
+        status: z.literal(VerificationStatus.REJECTED),
+        rejectionReason: z
+          .string({ error: 'A rejection reason is required' })
+          .trim()
+          .min(1, 'A rejection reason is required'),
+      },
+      'Only status and rejectionReason are accepted when rejecting',
+    ),
+  ],
+  { error: 'Status must be one of: VERIFIED, REJECTED' },
+)
+
 export const listStaffQuerySchema = z.object({
   ...paginationQueryShape,
   staffType: z.enum(StaffType).optional(),
@@ -53,4 +76,5 @@ export const listStaffQuerySchema = z.object({
 
 export type CreateStaffPayload = z.infer<typeof createStaffSchema>
 export type UpdateStaffPayload = z.infer<typeof updateStaffSchema>
+export type VerifyStaffPayload = z.infer<typeof verifyStaffSchema>
 export type ListStaffQuery = z.infer<typeof listStaffQuerySchema>

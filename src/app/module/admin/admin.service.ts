@@ -1,13 +1,30 @@
 import bcrypt from 'bcryptjs'
 import httpStatus from 'http-status'
 import type { Prisma } from '../../../generated/prisma/client'
-import { Role, StaffType, TransportStatus } from '../../../generated/prisma/enums'
+import {
+  Role,
+  StaffType,
+  TransportStatus,
+  VerificationStatus,
+} from '../../../generated/prisma/enums'
 import { config } from '../../config'
 import { AppError } from '../../errorHelpers/AppError'
 import { prisma } from '../../lib/prisma'
+import type { TokenPayload } from '../../utils/jwt'
 import { buildMeta, getPagination } from '../../utils/pagination'
 import { STAFF_NOT_FOUND_MESSAGE, staffSelect } from '../staff/staff.service'
-import type { CreateStaffPayload, ListStaffQuery, UpdateStaffPayload } from './admin.interface'
+import type {
+  CreateStaffPayload,
+  ListStaffQuery,
+  UpdateStaffPayload,
+  VerifyStaffPayload,
+} from './admin.interface'
+
+type Caller = Pick<TokenPayload, 'userId'>
+
+const AUDIT_STAFF_ENTITY = 'StaffProfile'
+const AUDIT_STAFF_VERIFIED = 'STAFF_VERIFIED'
+const AUDIT_STAFF_REJECTED = 'STAFF_REJECTED'
 
 const ACTIVE_TRANSPORT_STATUSES = [TransportStatus.REQUESTED, TransportStatus.IN_PROGRESS]
 
@@ -124,6 +141,44 @@ const updateStaff = async (staffId: string, payload: UpdateStaffPayload) => {
   })
 }
 
+// Approve or reject a staff member. Their profile change and the audit row (SRS 7.4) commit
+// together. Setting the status it already has is a 409 so the audit trail holds real changes only.
+const verifyStaff = async (caller: Caller, staffId: string, payload: VerifyStaffPayload) => {
+  const current = await findStaffOrThrow(staffId)
+  const { status } = payload
+
+  if (current.verificationStatus === status) {
+    throw new AppError(httpStatus.CONFLICT, `Staff is already ${status.toLowerCase()}`)
+  }
+
+  const isApproval = payload.status === VerificationStatus.VERIFIED
+  const rejectionReason =
+    payload.status === VerificationStatus.REJECTED ? payload.rejectionReason : null
+
+  const [staff] = await prisma.$transaction([
+    prisma.staffProfile.update({
+      where: { id: staffId },
+      data: {
+        verificationStatus: status,
+        verifiedAt: isApproval ? new Date() : null,
+        rejectionReason,
+      },
+      select: staffSelect,
+    }),
+    prisma.auditLog.create({
+      data: {
+        userId: caller.userId,
+        action: isApproval ? AUDIT_STAFF_VERIFIED : AUDIT_STAFF_REJECTED,
+        entity: AUDIT_STAFF_ENTITY,
+        entityId: staffId,
+        metadata: { from: current.verificationStatus, to: status, rejectionReason },
+      },
+    }),
+  ])
+
+  return staff
+}
+
 // Soft delete of profile and login together (one nested write). Refused while the staff member
 // still runs rooms or has open transport bookings, so nothing is left without an owner.
 const deleteStaff = async (staffId: string) => {
@@ -153,4 +208,11 @@ const deleteStaff = async (staffId: string) => {
   })
 }
 
-export const AdminService = { createStaff, listStaff, getStaff, updateStaff, deleteStaff }
+export const AdminService = {
+  createStaff,
+  listStaff,
+  getStaff,
+  updateStaff,
+  verifyStaff,
+  deleteStaff,
+}

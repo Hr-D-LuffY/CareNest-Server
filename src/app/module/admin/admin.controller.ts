@@ -1,8 +1,15 @@
 import httpStatus from 'http-status'
+import { VerificationStatus } from '../../../generated/prisma/enums'
 import { catchAsync } from '../../utils/catchAsync'
+import { getAuthUser } from '../../utils/getAuthUser'
 import { sendResponse } from '../../utils/sendResponse'
 import { idParamSchema } from '../../utils/validation'
-import { createStaffSchema, listStaffQuerySchema, updateStaffSchema } from './admin.interface'
+import {
+  createStaffSchema,
+  listStaffQuerySchema,
+  updateStaffSchema,
+  verifyStaffSchema,
+} from './admin.interface'
 import { AdminService } from './admin.service'
 
 const createStaff = catchAsync(async (req, res) => {
@@ -49,6 +56,24 @@ const updateStaff = catchAsync(async (req, res) => {
   })
 })
 
+const verifyStaff = catchAsync(async (req, res) => {
+  const payload = verifyStaffSchema.parse(req.body)
+  const staff = await AdminService.verifyStaff(
+    getAuthUser(req),
+    idParamSchema.parse(req.params).id,
+    payload,
+  )
+
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    message:
+      payload.status === VerificationStatus.VERIFIED
+        ? 'Staff verified successfully'
+        : 'Staff rejected successfully',
+    data: staff,
+  })
+})
+
 const deleteStaff = catchAsync(async (req, res) => {
   await AdminService.deleteStaff(idParamSchema.parse(req.params).id)
 
@@ -59,4 +84,11 @@ const deleteStaff = catchAsync(async (req, res) => {
   })
 })
 
-export const AdminController = { createStaff, listStaff, getStaff, updateStaff, deleteStaff }
+export const AdminController = {
+  createStaff,
+  listStaff,
+  getStaff,
+  updateStaff,
+  verifyStaff,
+  deleteStaff,
+}
