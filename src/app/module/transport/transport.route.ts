@@ -18,4 +18,7 @@ router.get('/', auth(Role.GUARDIAN), TransportController.listMyTransport)
 router.get('/:id', auth(Role.GUARDIAN), TransportController.getMyTransport)
 router.delete('/:id', auth(Role.GUARDIAN), TransportController.cancelTransport)
 
+router.post('/:id/start', auth(Role.STAFF), TransportController.startTrip)
+router.post('/:id/end', auth(Role.STAFF), TransportController.endTrip)
+
 export const TransportRoutes = router

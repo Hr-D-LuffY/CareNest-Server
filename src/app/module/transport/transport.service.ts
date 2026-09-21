@@ -1,9 +1,16 @@
 import httpStatus from 'http-status'
 import type { Prisma } from '../../../generated/prisma/client'
-import { StaffType, TransportStatus, VerificationStatus } from '../../../generated/prisma/enums'
+import {
+  StaffType,
+  TransportStatus,
+  VerificationStatus,
+  WalletTransactionType,
+} from '../../../generated/prisma/enums'
 import { AppError } from '../../errorHelpers/AppError'
 import { ACTIVE_BOOKING_STATUSES, lockRow } from '../../lib/booking-guards'
+import { calculateFare } from '../../lib/fare.service'
 import { prisma } from '../../lib/prisma'
+import { debitWallet } from '../../lib/wallet.service'
 import { toIsoDate } from '../../utils/date'
 import type { TokenPayload } from '../../utils/jwt'
 import { buildMeta, getPagination } from '../../utils/pagination'
@@ -27,6 +34,10 @@ const TRANSPORT_BASE_FARE = 50
 const AUDIT_TRANSPORT_ENTITY = 'TransportBooking'
 const AUDIT_TRANSPORT_REQUESTED = 'TRANSPORT_REQUESTED'
 const AUDIT_TRANSPORT_CANCELLED = 'TRANSPORT_CANCELLED'
+const AUDIT_TRIP_STARTED = 'TRIP_STARTED'
+const AUDIT_TRIP_ENDED = 'TRIP_ENDED'
+const TRIP_FARE_DESCRIPTION = 'Transport fare for'
+const MS_PER_MINUTE = 60_000
 const AUDIT_VEHICLE_ENTITY = 'Vehicle'
 const AUDIT_VEHICLE_REGISTERED = 'VEHICLE_REGISTERED'
 const VEHICLE_NOT_FOUND_MESSAGE = 'Vehicle not found'
@@ -362,7 +373,130 @@ const cancelTransport = async (caller: Caller, transportId: string) => {
   return toTransportView(cancelled)
 }
 
+// Only the driver assigned to the ride may log it. Someone else's ride gets the same 404 as a
+// missing one, so ids can't be probed.
+const findMyTrip = async (driverId: string, transportId: string) => {
+  const transport = await prisma.transportBooking.findFirst({
+    where: { id: transportId, driverId },
+    select: {
+      id: true,
+      status: true,
+      baseFare: true,
+      booking: {
+        select: { guardianId: true, sessionDate: true, child: { select: { name: true } } },
+      },
+      driver: { select: { perMinuteRate: true } },
+    },
+  })
+  if (!transport) throw new AppError(httpStatus.NOT_FOUND, TRANSPORT_NOT_FOUND_MESSAGE)
+  return transport
+}
+
+const startTrip = async (caller: Caller, transportId: string) => {
+  const driverId = await getMyDriverId(caller)
+  const transport = await findMyTrip(driverId, transportId)
+
+  if (transport.status !== TransportStatus.REQUESTED) {
+    throw new AppError(httpStatus.CONFLICT, `A ${transport.status} ride cannot be started`)
+  }
+  if (transport.booking.sessionDate.getTime() !== todayUtc().getTime()) {
+    throw new AppError(httpStatus.CONFLICT, 'A trip can only start on the session date')
+  }
+
+  const started = await prisma.$transaction(async (tx) => {
+    const { count } = await tx.transportBooking.updateMany({
+      where: { id: transportId, status: TransportStatus.REQUESTED },
+      data: { status: TransportStatus.IN_PROGRESS },
+    })
+    if (count === 0) {
+      throw new AppError(httpStatus.CONFLICT, 'This ride can no longer be started')
+    }
+
+    await tx.tripLog.create({ data: { transportBookingId: transportId, tripStart: new Date() } })
+    await tx.auditLog.create({
+      data: {
+        userId: caller.userId,
+        action: AUDIT_TRIP_STARTED,
+        entity: AUDIT_TRANSPORT_ENTITY,
+        entityId: transportId,
+      },
+    })
+    return tx.transportBooking.findUniqueOrThrow({
+      where: { id: transportId },
+      select: transportSelect,
+    })
+  })
+  return toTransportView(started)
+}
+
+const endTrip = async (caller: Caller, transportId: string) => {
+  const driverId = await getMyDriverId(caller)
+  const transport = await findMyTrip(driverId, transportId)
+
+  if (transport.status !== TransportStatus.IN_PROGRESS) {
+    throw new AppError(httpStatus.CONFLICT, `A ${transport.status} ride cannot be ended`)
+  }
+  const { perMinuteRate } = transport.driver
+  if (perMinuteRate === null) {
+    throw new AppError(
+      httpStatus.CONFLICT,
+      'This driver has no per-minute rate set, so the trip cannot be priced',
+    )
+  }
+
+  const tripLog = await prisma.tripLog.findUniqueOrThrow({
+    where: { transportBookingId: transportId },
+    select: { tripStart: true },
+  })
+  const tripEnd = new Date()
+  const durationMinutes = Math.ceil(
+    (tripEnd.getTime() - tripLog.tripStart.getTime()) / MS_PER_MINUTE,
+  )
+  const fare = transport.baseFare.add(
+    calculateFare({ units: durationMinutes, rate: perMinuteRate }),
+  )
+
+  const { ended, charged } = await prisma.$transaction(async (tx) => {
+    const { count } = await tx.tripLog.updateMany({
+      where: { transportBookingId: transportId, tripEnd: null },
+      data: { tripEnd, durationMinutes, fare },
+    })
+    if (count === 0) {
+      throw new AppError(httpStatus.CONFLICT, 'This ride can no longer be ended')
+    }
+
+    await tx.transportBooking.update({
+      where: { id: transportId },
+      data: { status: TransportStatus.COMPLETED },
+    })
+    const paid = await debitWallet(tx, {
+      guardianId: transport.booking.guardianId,
+      type: WalletTransactionType.TRANSPORT_FARE,
+      amount: fare,
+      description: `${TRIP_FARE_DESCRIPTION} ${transport.booking.child.name}`,
+      transportBookingId: transportId,
+    })
+    await tx.auditLog.create({
+      data: {
+        userId: caller.userId,
+        action: AUDIT_TRIP_ENDED,
+        entity: AUDIT_TRANSPORT_ENTITY,
+        entityId: transportId,
+        metadata: { durationMinutes, fare: fare.toString(), charged: paid },
+      },
+    })
+    const record = await tx.transportBooking.findUniqueOrThrow({
+      where: { id: transportId },
+      select: transportSelect,
+    })
+    return { ended: record, charged: paid }
+  })
+  return { ...toTransportView(ended), charged }
+}
+
 export const TransportService = {
+  startTrip,
+  endTrip,
   createVehicle,
   listMyVehicles,
   listVehicles,

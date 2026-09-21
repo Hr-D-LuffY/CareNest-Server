@@ -121,7 +121,32 @@ const cancelTransport = catchAsync(async (req, res) => {
   })
 })
 
+const startTrip = catchAsync(async (req, res) => {
+  const transport = await TransportService.startTrip(
+    getAuthUser(req),
+    idParamSchema.parse(req.params).id,
+  )
+
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    message: 'Trip started successfully',
+    data: transport,
+  })
+})
+
+const endTrip = catchAsync(async (req, res) => {
+  const trip = await TransportService.endTrip(getAuthUser(req), idParamSchema.parse(req.params).id)
+
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    message: 'Trip ended successfully',
+    data: trip,
+  })
+})
+
 export const TransportController = {
+  startTrip,
+  endTrip,
   createVehicle,
   listMyVehicles,
   listVehicles,
