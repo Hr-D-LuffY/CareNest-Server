@@ -1,10 +1,15 @@
 import httpStatus from 'http-status'
 import type { Prisma } from '../../../generated/prisma/client'
-import { BookingStatus, TransportStatus } from '../../../generated/prisma/enums'
+import {
+  BookingStatus,
+  TransportStatus,
+  WalletTransactionType,
+} from '../../../generated/prisma/enums'
 import { AppError } from '../../errorHelpers/AppError'
 import { ACTIVE_BOOKING_STATUSES, assertNotDoubleBooked, lockRow } from '../../lib/booking-guards'
-import { estimateCareFee, hoursElapsed } from '../../lib/fare.service'
+import { calculateFare, estimateCareFee, hoursElapsed } from '../../lib/fare.service'
 import { prisma } from '../../lib/prisma'
+import { debitWallet } from '../../lib/wallet.service'
 import { toIsoDate } from '../../utils/date'
 import type { TokenPayload } from '../../utils/jwt'
 import { CHILD_NOT_FOUND_MESSAGE, getGuardianId } from '../child/child.service'
@@ -27,12 +32,15 @@ const AUDIT_BOOKING_CANCELLED = 'BOOKING_CANCELLED'
 const AUDIT_BOOKING_CHECKED_IN = 'BOOKING_CHECKED_IN'
 const AUDIT_BOOKING_CHECKED_OUT = 'BOOKING_CHECKED_OUT'
 const BOOKING_NOT_FOUND_MESSAGE = 'Booking not found'
+const CARE_FEE_DESCRIPTION = 'Care fee for'
 
 const bookingSelect = {
   id: true,
   sessionDate: true,
   status: true,
   estimatedFee: true,
+  finalFee: true,
+  insufficientBalance: true,
   createdAt: true,
   child: { select: { id: true, name: true } },
   room: { select: { id: true, name: true, dayOfWeek: true, startTime: true, endTime: true } },
@@ -218,6 +226,10 @@ const findBookingInMyRoom = async (staffId: string, bookingId: string) => {
       status: true,
       sessionDate: true,
       roomId: true,
+      guardianId: true,
+      room: {
+        select: { name: true, priceMultiplier: true, staff: { select: { hourlyRate: true } } },
+      },
       checkinLog: { select: { checkInAt: true, checkOutAt: true } },
     },
   })
@@ -269,12 +281,14 @@ const checkIn = async (caller: Caller, bookingId: string) => {
   return toCheckinLogView(log)
 }
 
-// Staff logs the actual departure: stamps `checkOutAt`, stores `hoursUsed` and completes the
-// booking (SRS 4.8). The conditional update on `checkOutAt: null` stops a double-click logging it
-// twice. The fare and wallet deduction are layered on in the next commit.
+// Staff logs the actual departure (SRS 4.8): stamps `checkOutAt`, stores `hoursUsed`, prices the
+// stay (hoursUsed x hourlyRate x priceMultiplier) and debits the guardian's wallet, completing the
+// booking. If the wallet can't cover it, nothing is debited and the booking is flagged
+// `insufficientBalance` instead, so staff can still release the child. The conditional update on
+// `checkOutAt: null` stops a double-click logging (and charging) it twice.
 const checkOut = async (caller: Caller, bookingId: string) => {
   const staffId = await getMySitterId(caller)
-  const { checkinLog, roomId } = await findBookingInMyRoom(staffId, bookingId)
+  const { checkinLog, roomId, guardianId, room } = await findBookingInMyRoom(staffId, bookingId)
 
   if (!checkinLog) {
     throw new AppError(httpStatus.CONFLICT, 'The child has not been checked in yet')
@@ -283,8 +297,21 @@ const checkOut = async (caller: Caller, bookingId: string) => {
     throw new AppError(httpStatus.CONFLICT, 'The child is already checked out for this booking')
   }
 
+  if (room.staff.hourlyRate === null) {
+    throw new AppError(
+      httpStatus.CONFLICT,
+      'This room has no hourly rate set, so it cannot be priced',
+    )
+  }
+
   const checkOutAt = new Date()
   const hoursUsed = hoursElapsed(checkinLog.checkInAt, checkOutAt)
+  const finalFee = calculateFare({
+    units: hoursUsed,
+    rate: room.staff.hourlyRate,
+    multiplier: room.priceMultiplier,
+  })
+
   const log = await prisma.$transaction(async (tx) => {
     const { count } = await tx.checkinLog.updateMany({
       where: { bookingId, checkOutAt: null },
@@ -294,14 +321,29 @@ const checkOut = async (caller: Caller, bookingId: string) => {
       throw new AppError(httpStatus.CONFLICT, 'This booking can no longer be checked out')
     }
 
-    await tx.booking.update({ where: { id: bookingId }, data: { status: BookingStatus.COMPLETED } })
+    const charged = await debitWallet(tx, {
+      guardianId,
+      type: WalletTransactionType.CARE_FEE,
+      amount: finalFee,
+      description: `${CARE_FEE_DESCRIPTION} ${room.name}`,
+      bookingId,
+    })
+    await tx.booking.update({
+      where: { id: bookingId },
+      data: { status: BookingStatus.COMPLETED, finalFee, insufficientBalance: !charged },
+    })
     await tx.auditLog.create({
       data: {
         userId: caller.userId,
         action: AUDIT_BOOKING_CHECKED_OUT,
         entity: AUDIT_BOOKING_ENTITY,
         entityId: bookingId,
-        metadata: { roomId, hoursUsed: hoursUsed.toString() },
+        metadata: {
+          roomId,
+          hoursUsed: hoursUsed.toString(),
+          finalFee: finalFee.toString(),
+          charged,
+        },
       },
     })
     return tx.checkinLog.findUniqueOrThrow({ where: { bookingId }, select: checkinLogSelect })

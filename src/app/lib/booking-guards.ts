@@ -9,8 +9,11 @@ export const ACTIVE_BOOKING_STATUSES = [BookingStatus.PENDING, BookingStatus.CON
 
 // Locks the row until the transaction ends, so two concurrent requests queue up behind each other
 // instead of both passing the same check.
-export const lockRow = (tx: Prisma.TransactionClient, table: 'rooms' | 'children', id: string) =>
-  tx.$queryRawUnsafe(`SELECT id FROM ${table} WHERE id = $1 FOR UPDATE`, id)
+export const lockRow = (
+  tx: Prisma.TransactionClient,
+  table: 'rooms' | 'children' | 'guardian_profiles',
+  id: string,
+) => tx.$queryRawUnsafe(`SELECT id FROM ${table} WHERE id = $1 FOR UPDATE`, id)
 
 // The active booking that overlaps this time window for the child on that date, if any (SRS 4.6).
 export const findOverlappingBooking = (
