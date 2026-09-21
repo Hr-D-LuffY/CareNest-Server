@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import { StaffType, VerificationStatus } from '../../../generated/prisma/enums'
 import { paginationQueryShape } from '../../utils/pagination'
-import { atLeastOneField } from '../../utils/validation'
+import { atLeastOneField, updateBodySchema } from '../../utils/validation'
 import { passwordSchema } from '../auth/auth.interface'
 import { experienceSchema } from '../staff/staff.interface'
 
@@ -30,15 +30,17 @@ export const createStaffSchema = z.object({
 })
 
 // Email is the login identity and verification has its own workflow, so neither is editable here.
-export const updateStaffSchema = z
-  .object({
+export const updateStaffSchema = updateBodySchema(
+  {
     name: z.string().trim().min(1, 'Name cannot be empty'),
     staffType: staffTypeSchema,
     bio: z.string().trim().min(1).nullable(),
     experience: experienceSchema,
     hourlyRate: rateSchema.nullable(),
     perMinuteRate: rateSchema.nullable(),
-  })
+  },
+  'Email cannot be changed and verification has its own endpoint',
+)
   .partial()
   .refine(...atLeastOneField)
 

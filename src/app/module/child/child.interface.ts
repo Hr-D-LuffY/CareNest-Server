@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import { Tier } from '../../../generated/prisma/enums'
 import { paginationQueryShape } from '../../utils/pagination'
-import { atLeastOneField } from '../../utils/validation'
+import { atLeastOneField, updateBodySchema } from '../../utils/validation'
 
 const requiredText = (label: string) => z.string().trim().min(1, `${label} is required`)
 const optionalText = z.string().trim().min(1).nullable().optional()
@@ -20,8 +20,10 @@ const childFields = {
 
 export const createChildSchema = z.object(childFields)
 
-export const updateChildSchema = z
-  .object(childFields)
+export const updateChildSchema = updateBodySchema(
+  childFields,
+  'You can only update name, date of birth, tier, allergies, conditions and emergency contact',
+)
   .partial()
   .refine(...atLeastOneField)
 

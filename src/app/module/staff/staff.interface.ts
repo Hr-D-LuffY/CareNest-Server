@@ -1,6 +1,7 @@
 import { z } from 'zod'
-import { DayOfWeek } from '../../../generated/prisma/enums'
-import { atLeastOneField } from '../../utils/validation'
+import { DayOfWeek, TransportStatus } from '../../../generated/prisma/enums'
+import { paginationQueryShape } from '../../utils/pagination'
+import { atLeastOneField, updateBodySchema } from '../../utils/validation'
 
 export const MAX_EXPERIENCE_YEARS = 60
 
@@ -12,13 +13,14 @@ export const experienceSchema = z
 
 // Staff edit only their own presentation fields. Type, rates and verification are admin-managed
 // because they drive fares and who is allowed to run rooms.
-export const updateMyStaffSchema = z
-  .object({
+export const updateMyStaffSchema = updateBodySchema(
+  {
     name: z.string().trim().min(1, 'Name cannot be empty').optional(),
     bio: z.string().trim().min(1, 'Bio cannot be empty').nullable().optional(),
     experience: experienceSchema.optional(),
-  })
-  .refine(...atLeastOneField)
+  },
+  'Staff can only update name, bio and experience. Staff type and rates are set by an admin',
+).refine(...atLeastOneField)
 
 const TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/
 const END_AFTER_START_MESSAGE = 'End time must be after start time'
@@ -44,11 +46,37 @@ export const createSlotSchema = z
 
 // The start/end order can't be checked here when only one side is sent: the service checks the
 // merged result against the stored slot.
-export const updateSlotSchema = z
-  .object(slotFields)
+export const updateSlotSchema = updateBodySchema(
+  slotFields,
+  'You can only update dayOfWeek, startTime and endTime',
+)
   .partial()
   .refine(...atLeastOneField)
 
+export const listMyBookingsQuerySchema = z.object({
+  ...paginationQueryShape,
+  // Only bookings on this calendar day (YYYY-MM-DD).
+  date: z.coerce.date({ error: 'Date must be a valid date, e.g. 2026-09-21' }).optional(),
+})
+
+export const listMyTripsQuerySchema = z.object({
+  ...paginationQueryShape,
+  status: z.enum(TransportStatus).optional(),
+})
+
+export const earningsQuerySchema = z
+  .object({
+    from: z.coerce.date({ error: 'From must be a valid date' }).optional(),
+    to: z.coerce.date({ error: 'To must be a valid date' }).optional(),
+  })
+  .refine(({ from, to }) => !from || !to || from <= to, {
+    message: 'From must not be after to',
+    path: ['from'],
+  })
+
 export type UpdateMyStaffPayload = z.infer<typeof updateMyStaffSchema>
+export type ListMyBookingsQuery = z.infer<typeof listMyBookingsQuerySchema>
+export type ListMyTripsQuery = z.infer<typeof listMyTripsQuerySchema>
+export type EarningsQuery = z.infer<typeof earningsQuerySchema>
 export type CreateSlotPayload = z.infer<typeof createSlotSchema>
 export type UpdateSlotPayload = z.infer<typeof updateSlotSchema>

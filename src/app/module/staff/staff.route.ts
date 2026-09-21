@@ -7,6 +7,9 @@ const router = Router()
 
 router.get('/me', auth(Role.STAFF), StaffController.getMyProfile)
 router.patch('/me', auth(Role.STAFF), StaffController.updateMyProfile)
+router.get('/me/bookings', auth(Role.STAFF), StaffController.listMyBookings)
+router.get('/me/trips', auth(Role.STAFF), StaffController.listMyTrips)
+router.get('/me/earnings', auth(Role.STAFF), StaffController.getMyEarnings)
 
 router.post('/availability', auth(Role.STAFF), StaffController.createMySlot)
 router.patch('/availability/:id', auth(Role.STAFF), StaffController.updateMySlot)

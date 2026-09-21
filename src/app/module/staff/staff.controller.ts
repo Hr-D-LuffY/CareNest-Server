@@ -3,7 +3,14 @@ import { catchAsync } from '../../utils/catchAsync'
 import { getAuthUser } from '../../utils/getAuthUser'
 import { sendResponse } from '../../utils/sendResponse'
 import { idParamSchema } from '../../utils/validation'
-import { createSlotSchema, updateMyStaffSchema, updateSlotSchema } from './staff.interface'
+import {
+  createSlotSchema,
+  earningsQuerySchema,
+  listMyBookingsQuerySchema,
+  listMyTripsQuerySchema,
+  updateMyStaffSchema,
+  updateSlotSchema,
+} from './staff.interface'
 import { StaffService } from './staff.service'
 
 const getMyProfile = catchAsync(async (req, res) => {
@@ -24,6 +31,41 @@ const updateMyProfile = catchAsync(async (req, res) => {
     statusCode: httpStatus.OK,
     message: 'Staff profile updated successfully',
     data: staff,
+  })
+})
+
+const listMyBookings = catchAsync(async (req, res) => {
+  const query = listMyBookingsQuerySchema.parse(req.query)
+  const { items, meta } = await StaffService.listMyBookings(getAuthUser(req), query)
+
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    message: 'Assigned bookings retrieved successfully',
+    data: items,
+    meta,
+  })
+})
+
+const listMyTrips = catchAsync(async (req, res) => {
+  const query = listMyTripsQuerySchema.parse(req.query)
+  const { items, meta } = await StaffService.listMyTrips(getAuthUser(req), query)
+
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    message: 'Assigned trips retrieved successfully',
+    data: items,
+    meta,
+  })
+})
+
+const getMyEarnings = catchAsync(async (req, res) => {
+  const query = earningsQuerySchema.parse(req.query)
+  const earnings = await StaffService.getMyEarnings(getAuthUser(req), query)
+
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    message: 'Earnings retrieved successfully',
+    data: earnings,
   })
 })
 
@@ -76,6 +118,9 @@ const deleteMySlot = catchAsync(async (req, res) => {
 export const StaffController = {
   getMyProfile,
   updateMyProfile,
+  listMyBookings,
+  listMyTrips,
+  getMyEarnings,
   createMySlot,
   listStaffSlots,
   updateMySlot,

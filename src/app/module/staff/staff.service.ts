@@ -1,10 +1,16 @@
 import httpStatus from 'http-status'
+import { Prisma } from '../../../generated/prisma/client'
+import { BookingStatus, StaffType, TransportStatus } from '../../../generated/prisma/enums'
 import { AppError } from '../../errorHelpers/AppError'
 import { prisma } from '../../lib/prisma'
 import type { TokenPayload } from '../../utils/jwt'
+import { buildMeta, getPagination } from '../../utils/pagination'
 import {
   type CreateSlotPayload,
+  type EarningsQuery,
   isEndAfterStart,
+  type ListMyBookingsQuery,
+  type ListMyTripsQuery,
   type UpdateMyStaffPayload,
   type UpdateSlotPayload,
 } from './staff.interface'
@@ -152,9 +158,145 @@ const deleteMySlot = async (caller: Caller, slotId: string) => {
   await prisma.availabilitySlot.delete({ where: { id: slotId } })
 }
 
+const SITTER_TYPES: StaffType[] = [StaffType.SITTER, StaffType.BOTH]
+const DRIVER_TYPES: StaffType[] = [StaffType.DRIVER, StaffType.BOTH]
+
+// Care rooms are run by sitters and rides by drivers, so a staff type outside the allowed set
+// gets a clear 403 instead of a confusingly empty list.
+const getMyProfileOfType = async (caller: Caller, allowed: StaffType[], duty: string) => {
+  const staff = await getMyProfile(caller)
+  if (!allowed.includes(staff.staffType)) {
+    throw new AppError(httpStatus.FORBIDDEN, `Only ${duty} staff can access this resource`)
+  }
+  return staff
+}
+
+const bookingSelect = {
+  id: true,
+  sessionDate: true,
+  status: true,
+  child: {
+    select: {
+      id: true,
+      name: true,
+      tier: true,
+      allergies: true,
+      conditions: true,
+      emergencyContactName: true,
+      emergencyContactPhone: true,
+    },
+  },
+  room: { select: { id: true, name: true, dayOfWeek: true, startTime: true, endTime: true } },
+  checkinLog: { select: { checkInAt: true, checkOutAt: true } },
+} as const
+
+// Confirmed bookings in this staff member's rooms that still need a check-in or a check-out.
+const listMyBookings = async (caller: Caller, query: ListMyBookingsQuery) => {
+  const { id: staffId } = await getMyProfileOfType(caller, SITTER_TYPES, 'sitter')
+  const where: Prisma.BookingWhereInput = {
+    room: { staffId, isDeleted: false },
+    status: BookingStatus.CONFIRMED,
+    OR: [{ checkinLog: null }, { checkinLog: { checkOutAt: null } }],
+    ...(query.date && { sessionDate: query.date }),
+  }
+
+  const [items, total] = await Promise.all([
+    prisma.booking.findMany({
+      where,
+      select: bookingSelect,
+      orderBy: [{ sessionDate: 'asc' }, { createdAt: 'asc' }],
+      ...getPagination(query),
+    }),
+    prisma.booking.count({ where }),
+  ])
+
+  return { items, meta: buildMeta(query, total) }
+}
+
+const tripSelect = {
+  id: true,
+  status: true,
+  pickupAddress: true,
+  dropoffAddress: true,
+  baseFare: true,
+  booking: {
+    select: { id: true, sessionDate: true, child: { select: { id: true, name: true } } },
+  },
+  vehicle: { select: { id: true, plateNumber: true, vehicleType: true } },
+  tripLog: { select: { tripStart: true, tripEnd: true, durationMinutes: true, fare: true } },
+} as const
+
+const listMyTrips = async (caller: Caller, query: ListMyTripsQuery) => {
+  const { id: driverId } = await getMyProfileOfType(caller, DRIVER_TYPES, 'driver')
+  const where: Prisma.TransportBookingWhereInput = {
+    driverId,
+    ...(query.status && { status: query.status }),
+  }
+
+  const [items, total] = await Promise.all([
+    prisma.transportBooking.findMany({
+      where,
+      select: tripSelect,
+      orderBy: { createdAt: 'desc' },
+      ...getPagination(query),
+    }),
+    prisma.transportBooking.count({ where }),
+  ])
+
+  return { items, meta: buildMeta(query, total) }
+}
+
+// Earnings are counted when the work finished (check-out / trip end), inside the optional
+// from–to window. A care fee the wallet couldn't cover was never collected, so it is left out.
+const getMyEarnings = async (caller: Caller, { from, to }: EarningsQuery) => {
+  const { id: staffId, staffType } = await getMyProfile(caller)
+  const finishedBetween = { ...(from && { gte: from }), ...(to && { lte: to }) }
+  const hasWindow = from !== undefined || to !== undefined
+  const zero = new Prisma.Decimal(0)
+
+  const [care, trips] = await Promise.all([
+    SITTER_TYPES.includes(staffType)
+      ? prisma.booking.aggregate({
+          where: {
+            room: { staffId },
+            status: BookingStatus.COMPLETED,
+            insufficientBalance: false,
+            ...(hasWindow && { checkinLog: { checkOutAt: finishedBetween } }),
+          },
+          _sum: { finalFee: true },
+          _count: true,
+        })
+      : null,
+    DRIVER_TYPES.includes(staffType)
+      ? prisma.tripLog.aggregate({
+          where: {
+            transportBooking: { driverId: staffId, status: TransportStatus.COMPLETED },
+            ...(hasWindow && { tripEnd: finishedBetween }),
+          },
+          _sum: { fare: true },
+          _count: true,
+        })
+      : null,
+  ])
+
+  const careTotal = care?._sum.finalFee ?? zero
+  const tripTotal = trips?._sum.fare ?? zero
+
+  return {
+    from: from ?? null,
+    to: to ?? null,
+    careFees: { total: careTotal, count: care?._count ?? 0 },
+    tripFares: { total: tripTotal, count: trips?._count ?? 0 },
+    total: careTotal.plus(tripTotal),
+  }
+}
+
 export const StaffService = {
   getMyProfile,
   updateMyProfile,
+  listMyBookings,
+  listMyTrips,
+  getMyEarnings,
   createMySlot,
   listStaffSlots,
   updateMySlot,
