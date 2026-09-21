@@ -10,3 +10,4 @@ export const BKASH_REQUEST_TIMEOUT_MS = 15_000
 // Refresh the cached id_token this long before bKash says it expires.
 export const BKASH_TOKEN_EXPIRY_BUFFER_MS = 60_000
 export const BKASH_NOT_CONFIGURED_MESSAGE = 'bKash payments are not configured on this server'
+export const BKASH_STATUS_COMPLETED = 'Completed'

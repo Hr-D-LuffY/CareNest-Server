@@ -113,3 +113,44 @@ export const createBkashPayment = async ({
   }
   return { paymentId: parsed.data.paymentID, checkoutUrl: parsed.data.bkashURL }
 }
+
+// Execute Payment returns `merchantInvoiceNumber`, Query Payment returns `merchantInvoice`.
+const paymentDetailsSchema = z.object({
+  trxID: z.string().min(1).optional(),
+  transactionStatus: z.string(),
+  amount: z.string().min(1),
+  currency: z.string().optional(),
+  merchantInvoiceNumber: z.string().optional(),
+  merchantInvoice: z.string().optional(),
+})
+
+const toPaymentDetails = (payload: unknown) => {
+  const parsed = paymentDetailsSchema.safeParse(payload)
+  if (!parsed.success) {
+    throw new AppError(httpStatus.BAD_GATEWAY, 'bKash returned an unexpected payment status')
+  }
+  const { trxID, merchantInvoiceNumber, merchantInvoice, ...rest } = parsed.data
+  return {
+    ...rest,
+    trxId: trxID,
+    invoiceNumber: merchantInvoiceNumber ?? merchantInvoice,
+  }
+}
+
+const authorizedPost = async (path: string, paymentId: string) => {
+  const { appKey } = getCredentials()
+  return post(
+    path,
+    { Authorization: await getIdToken(), 'X-APP-Key': appKey },
+    { paymentID: paymentId },
+  )
+}
+
+// Asks bKash to actually take the money for a checkout the guardian approved. Only its answer, not
+// the redirect's `status` query, may be trusted.
+export const executeBkashPayment = async (paymentId: string) =>
+  toPaymentDetails(await authorizedPost('/tokenized/checkout/execute', paymentId))
+
+// Read-only lookup, used when Execute is refused because a first callback already executed it.
+export const queryBkashPayment = async (paymentId: string) =>
+  toPaymentDetails(await authorizedPost('/tokenized/checkout/payment/status', paymentId))

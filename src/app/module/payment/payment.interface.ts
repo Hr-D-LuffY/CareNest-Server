@@ -16,3 +16,13 @@ export const topUpSchema = z.object({
 })
 
 export type TopUpPayload = z.infer<typeof topUpSchema>
+
+// What bKash appends to our callback URL after the guardian finishes (or abandons) checkout.
+export const BKASH_CALLBACK_STATUSES = ['success', 'failure', 'cancel'] as const
+
+export const bkashCallbackQuerySchema = z.object({
+  paymentID: z.string().min(1, 'paymentID is required'),
+  status: z.enum(BKASH_CALLBACK_STATUSES, { error: 'Unknown payment status' }),
+})
+
+export type BkashCallbackQuery = z.infer<typeof bkashCallbackQuerySchema>
