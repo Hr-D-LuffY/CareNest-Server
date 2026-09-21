@@ -175,6 +175,10 @@ const getMyProfileOfType = async (caller: Caller, allowed: StaffType[], duty: st
 export const getMySitterId = async (caller: Caller) =>
   (await getMyProfileOfType(caller, SITTER_TYPES, 'sitter')).id
 
+// The caller's staff profile id, for modules that act on the rides a driver runs (vehicles).
+export const getMyDriverId = async (caller: Caller) =>
+  (await getMyProfileOfType(caller, DRIVER_TYPES, 'driver')).id
+
 const bookingSelect = {
   id: true,
   sessionDate: true,

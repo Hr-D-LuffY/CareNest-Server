@@ -12,6 +12,7 @@ import { GuardianRoutes } from './app/module/guardian/guardian.route'
 import { PaymentRoutes } from './app/module/payment/payment.route'
 import { RoomRoutes } from './app/module/room/room.route'
 import { StaffRoutes } from './app/module/staff/staff.route'
+import { TransportRoutes } from './app/module/transport/transport.route'
 import { WaitlistRoutes } from './app/module/waitlist/waitlist.route'
 import { WalletRoutes } from './app/module/wallet/wallet.route'
 import { sendResponse } from './app/utils/sendResponse'
@@ -47,6 +48,7 @@ app.use('/api/v1/room', WaitlistRoutes)
 app.use('/api/v1/booking', BookingRoutes)
 app.use('/api/v1/payment', PaymentRoutes)
 app.use('/api/v1/wallet', WalletRoutes)
+app.use('/api/v1/transport', TransportRoutes)
 app.use('/api/v1/staff', StaffRoutes)
 app.use('/api/v1/admin', AdminRoutes)
 

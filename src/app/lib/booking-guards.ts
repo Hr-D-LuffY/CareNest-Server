@@ -11,7 +11,7 @@ export const ACTIVE_BOOKING_STATUSES = [BookingStatus.PENDING, BookingStatus.CON
 // instead of both passing the same check.
 export const lockRow = (
   tx: Prisma.TransactionClient,
-  table: 'rooms' | 'children' | 'guardian_profiles',
+  table: 'rooms' | 'children' | 'guardian_profiles' | 'bookings' | 'vehicles',
   id: string,
 ) => tx.$queryRawUnsafe(`SELECT id FROM ${table} WHERE id = $1 FOR UPDATE`, id)
 
