@@ -1,7 +1,8 @@
 import httpStatus from 'http-status'
+import type { Prisma } from '../../../generated/prisma/client'
 import {
   BookingStatus,
-  type DayOfWeek,
+  DayOfWeek,
   StaffType,
   VerificationStatus,
   WaitlistStatus,
@@ -9,9 +10,16 @@ import {
 import { AppError } from '../../errorHelpers/AppError'
 import { prisma } from '../../lib/prisma'
 import type { TokenPayload } from '../../utils/jwt'
+import { buildMeta, getPagination } from '../../utils/pagination'
 import { END_AFTER_START_MESSAGE, isEndAfterStart } from '../staff/staff.interface'
 import { STAFF_NOT_FOUND_MESSAGE } from '../staff/staff.service'
-import type { CreateRoomPayload, UpdateRoomPayload } from './room.interface'
+import type {
+  CreateRoomPayload,
+  ListRoomsQuery,
+  ROOM_SORT_FIELDS,
+  RoomDetailQuery,
+  UpdateRoomPayload,
+} from './room.interface'
 
 type Caller = Pick<TokenPayload, 'userId'>
 type Schedule = { dayOfWeek: DayOfWeek; startTime: string; endTime: string }
@@ -36,11 +44,25 @@ const roomSelect = {
   staff: { select: { id: true, staffType: true, user: { select: { name: true } } } },
 } as const
 
-// Session dates are calendar dates (@db.Date), so "today" is the UTC midnight of today.
-const todayUtc = () => {
-  const now = new Date()
-  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))
-}
+const DAYS_IN_WEEK = 7
+const MS_PER_DAY = 24 * 60 * 60 * 1000
+const ISO_DATE_LENGTH = 'YYYY-MM-DD'.length
+
+// Index = Date#getUTCDay()
+const WEEKDAYS = [
+  DayOfWeek.SUNDAY,
+  DayOfWeek.MONDAY,
+  DayOfWeek.TUESDAY,
+  DayOfWeek.WEDNESDAY,
+  DayOfWeek.THURSDAY,
+  DayOfWeek.FRIDAY,
+  DayOfWeek.SATURDAY,
+]
+
+// Session dates are calendar dates (@db.Date), so they are compared as UTC midnights.
+const startOfUtcDay = (date: Date) =>
+  new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()))
+const todayUtc = () => startOfUtcDay(new Date())
 
 const findRoomOrThrow = async (roomId: string) => {
   const room = await prisma.room.findFirst({
@@ -146,6 +168,153 @@ const assertCapacityFits = async (roomId: string, capacity: number) => {
   }
 }
 
+// A room repeats weekly: its next session is the first date from today (inclusive) that falls on
+// the room's day of the week.
+const nextSessionDate = (dayOfWeek: DayOfWeek) => {
+  const today = todayUtc()
+  const daysAhead = (WEEKDAYS.indexOf(dayOfWeek) - today.getUTCDay() + DAYS_IN_WEEK) % DAYS_IN_WEEK
+  return new Date(today.getTime() + daysAhead * MS_PER_DAY)
+}
+
+const resolveRequestedDate = (date?: Date) => {
+  if (!date) return undefined
+  const sessionDate = startOfUtcDay(date)
+  if (sessionDate < todayUtc()) {
+    throw new AppError(httpStatus.BAD_REQUEST, 'Date cannot be in the past')
+  }
+  return sessionDate
+}
+
+type RoomRecord = Awaited<ReturnType<typeof findRoomOrThrow>>
+
+const seatKey = (roomId: string, sessionDate: Date) => `${roomId}|${sessionDate.getTime()}`
+
+// THE one place seatsLeft is computed (booking validation and waitlist promotion reuse it): seats
+// taken are the CONFIRMED bookings for that room on that session date. One grouped query serves
+// any number of rooms. Without `date`, each room is checked for its next upcoming session.
+export const attachSeatsLeft = async (rooms: RoomRecord[], date?: Date) => {
+  const sessions = rooms.map((room) => ({
+    room,
+    sessionDate: date ?? nextSessionDate(room.dayOfWeek),
+  }))
+  const dates = [
+    ...new Map(sessions.map(({ sessionDate }) => [sessionDate.getTime(), sessionDate])).values(),
+  ]
+
+  const booked =
+    rooms.length === 0
+      ? []
+      : await prisma.booking.groupBy({
+          by: ['roomId', 'sessionDate'],
+          where: {
+            roomId: { in: rooms.map((room) => room.id) },
+            sessionDate: { in: dates },
+            status: BookingStatus.CONFIRMED,
+          },
+          _count: { _all: true },
+        })
+  const bookedByRoomDate = new Map(
+    booked.map((group) => [seatKey(group.roomId, group.sessionDate), group._count._all]),
+  )
+
+  return sessions.map(({ room, sessionDate }) => {
+    const bookedSeats = bookedByRoomDate.get(seatKey(room.id, sessionDate)) ?? 0
+    return {
+      ...room,
+      sessionDate,
+      bookedSeats,
+      seatsLeft: Math.max(0, room.capacity - bookedSeats),
+    }
+  })
+}
+
+type RoomWithSeats = Awaited<ReturnType<typeof attachSeatsLeft>>[number]
+
+const toRoomView = ({ sessionDate, ...room }: RoomWithSeats) => ({
+  ...room,
+  sessionDate: sessionDate.toISOString().slice(0, ISO_DATE_LENGTH),
+})
+
+const SORT_KEYS: Record<
+  (typeof ROOM_SORT_FIELDS)[number],
+  (room: RoomWithSeats) => string | number
+> = {
+  createdAt: (room) => room.createdAt.getTime(),
+  name: (room) => room.name.toLowerCase(),
+  startTime: (room) => room.startTime,
+  capacity: (room) => room.capacity,
+  priceMultiplier: (room) => room.priceMultiplier.toNumber(),
+  seatsLeft: (room) => room.seatsLeft,
+}
+
+// Stable sort, so rooms that tie keep the newest-first order they were fetched in.
+const sortRooms = (
+  rooms: RoomWithSeats[],
+  sortBy: keyof typeof SORT_KEYS,
+  sortOrder: 'asc' | 'desc',
+) => {
+  const key = SORT_KEYS[sortBy]
+  const direction = sortOrder === 'asc' ? 1 : -1
+  return [...rooms].sort((a, b) => {
+    const [left, right] = [key(a), key(b)]
+    if (left === right) return 0
+    return left < right ? -direction : direction
+  })
+}
+
+// seatsLeft is computed per room, so filtering and sorting by it happens after the fetch and the
+// page is cut from the result. The room catalogue is small and admin-managed, so this stays cheap.
+const listRooms = async (query: ListRoomsQuery) => {
+  const { tier, status, dayOfWeek, date, q, sortBy, sortOrder } = query
+  const sessionDate = resolveRequestedDate(date)
+  const dateWeekday = sessionDate && WEEKDAYS[sessionDate.getUTCDay()]
+  if (dateWeekday && dayOfWeek && dateWeekday !== dayOfWeek) {
+    throw new AppError(httpStatus.BAD_REQUEST, `That date is a ${dateWeekday}, not a ${dayOfWeek}`)
+  }
+  const runsOn = dateWeekday ?? dayOfWeek
+
+  const where: Prisma.RoomWhereInput = {
+    isDeleted: false,
+    ...(tier && { tier }),
+    ...(runsOn && { dayOfWeek: runsOn }),
+    ...(q && {
+      OR: [
+        { name: { contains: q, mode: 'insensitive' } },
+        { staff: { user: { name: { contains: q, mode: 'insensitive' } } } },
+      ],
+    }),
+  }
+  const rooms = await prisma.room.findMany({
+    where,
+    select: roomSelect,
+    orderBy: { createdAt: 'desc' },
+  })
+
+  const withSeats = await attachSeatsLeft(rooms, sessionDate)
+  const matching = status
+    ? withSeats.filter((room) => room.seatsLeft > 0 === (status === 'AVAILABLE'))
+    : withSeats
+  const sorted = sortRooms(matching, sortBy, sortOrder)
+
+  const { skip, take } = getPagination(query)
+  return {
+    items: sorted.slice(skip, skip + take).map(toRoomView),
+    meta: buildMeta(query, sorted.length),
+  }
+}
+
+const getRoom = async (roomId: string, { date }: RoomDetailQuery) => {
+  const room = await findRoomOrThrow(roomId)
+  const sessionDate = resolveRequestedDate(date)
+  if (sessionDate && WEEKDAYS[sessionDate.getUTCDay()] !== room.dayOfWeek) {
+    throw new AppError(httpStatus.BAD_REQUEST, `This room runs on ${room.dayOfWeek}s`)
+  }
+
+  const [withSeats] = await attachSeatsLeft([room], sessionDate)
+  if (!withSeats) throw new AppError(httpStatus.NOT_FOUND, ROOM_NOT_FOUND_MESSAGE)
+  return toRoomView(withSeats)
+}
+
 const createRoom = async (payload: CreateRoomPayload) => {
   const { name, tier, capacity, dayOfWeek, startTime, endTime, priceMultiplier, staffId } = payload
   await assertRoomAssignable(staffId, { dayOfWeek, startTime, endTime })
@@ -226,4 +395,4 @@ const deleteRoom = async (caller: Caller, roomId: string) => {
   ])
 }
 
-export const RoomService = { createRoom, updateRoom, deleteRoom }
+export const RoomService = { createRoom, listRooms, getRoom, updateRoom, deleteRoom }

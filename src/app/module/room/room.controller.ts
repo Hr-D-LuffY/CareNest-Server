@@ -3,7 +3,13 @@ import { catchAsync } from '../../utils/catchAsync'
 import { getAuthUser } from '../../utils/getAuthUser'
 import { sendResponse } from '../../utils/sendResponse'
 import { idParamSchema } from '../../utils/validation'
-import { createRoomSchema, updateRoomSchema } from './room.interface'
+import {
+  createRoomSchema,
+  listRoomsQuerySchema,
+  roomDetailQuerySchema,
+  searchRoomsQuerySchema,
+  updateRoomSchema,
+} from './room.interface'
 import { RoomService } from './room.service'
 
 const createRoom = catchAsync(async (req, res) => {
@@ -13,6 +19,41 @@ const createRoom = catchAsync(async (req, res) => {
   sendResponse(res, {
     statusCode: httpStatus.CREATED,
     message: 'Room created successfully',
+    data: room,
+  })
+})
+
+const listRooms = catchAsync(async (req, res) => {
+  const query = listRoomsQuerySchema.parse(req.query)
+  const { items, meta } = await RoomService.listRooms(query)
+
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    message: 'Rooms retrieved successfully',
+    data: items,
+    meta,
+  })
+})
+
+const searchRooms = catchAsync(async (req, res) => {
+  const query = searchRoomsQuerySchema.parse(req.query)
+  const { items, meta } = await RoomService.listRooms(query)
+
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    message: 'Rooms retrieved successfully',
+    data: items,
+    meta,
+  })
+})
+
+const getRoom = catchAsync(async (req, res) => {
+  const query = roomDetailQuerySchema.parse(req.query)
+  const room = await RoomService.getRoom(idParamSchema.parse(req.params).id, query)
+
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    message: 'Room retrieved successfully',
     data: room,
   })
 })
@@ -38,4 +79,11 @@ const deleteRoom = catchAsync(async (req, res) => {
   })
 })
 
-export const RoomController = { createRoom, updateRoom, deleteRoom }
+export const RoomController = {
+  createRoom,
+  listRooms,
+  searchRooms,
+  getRoom,
+  updateRoom,
+  deleteRoom,
+}
