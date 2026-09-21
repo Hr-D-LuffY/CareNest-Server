@@ -202,4 +202,16 @@ const handleBkashCallback = async ({ paymentID, status }: BkashCallbackQuery) =>
   return findPaymentResult(payment.id)
 }
 
-export const PaymentService = { initiateTopUp, handleBkashCallback }
+// The guardian polls their own payment while (or after) paying on bKash (SRS 4.3). Someone else's
+// payment gets the same 404 as a missing one, so ids can't be probed.
+const getMyPayment = async (caller: Caller, paymentId: string) => {
+  const guardianId = await getGuardianId(caller)
+  const payment = await prisma.payment.findFirst({
+    where: { id: paymentId, guardianId },
+    select: { ...paymentResultSelect, currency: true, createdAt: true, updatedAt: true },
+  })
+  if (!payment) throw new AppError(httpStatus.NOT_FOUND, 'Payment not found')
+  return payment
+}
+
+export const PaymentService = { initiateTopUp, handleBkashCallback, getMyPayment }

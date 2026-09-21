@@ -3,6 +3,7 @@ import { PaymentStatus } from '../../../generated/prisma/enums'
 import { catchAsync } from '../../utils/catchAsync'
 import { getAuthUser } from '../../utils/getAuthUser'
 import { sendResponse } from '../../utils/sendResponse'
+import { idParamSchema } from '../../utils/validation'
 import { bkashCallbackQuerySchema, topUpSchema } from './payment.interface'
 import { PaymentService } from './payment.service'
 
@@ -36,4 +37,17 @@ const handleBkashCallback = catchAsync(async (req, res) => {
   sendResponse(res, { ...CALLBACK_OUTCOMES[payment.status], data: payment })
 })
 
-export const PaymentController = { initiateTopUp, handleBkashCallback }
+const getMyPayment = catchAsync(async (req, res) => {
+  const payment = await PaymentService.getMyPayment(
+    getAuthUser(req),
+    idParamSchema.parse(req.params).id,
+  )
+
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    message: 'Payment retrieved successfully',
+    data: payment,
+  })
+})
+
+export const PaymentController = { initiateTopUp, handleBkashCallback, getMyPayment }

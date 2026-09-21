@@ -13,6 +13,7 @@ import { PaymentRoutes } from './app/module/payment/payment.route'
 import { RoomRoutes } from './app/module/room/room.route'
 import { StaffRoutes } from './app/module/staff/staff.route'
 import { WaitlistRoutes } from './app/module/waitlist/waitlist.route'
+import { WalletRoutes } from './app/module/wallet/wallet.route'
 import { sendResponse } from './app/utils/sendResponse'
 
 const app = express()
@@ -45,6 +46,7 @@ app.use('/api/v1/room', RoomRoutes)
 app.use('/api/v1/room', WaitlistRoutes)
 app.use('/api/v1/booking', BookingRoutes)
 app.use('/api/v1/payment', PaymentRoutes)
+app.use('/api/v1/wallet', WalletRoutes)
 app.use('/api/v1/staff', StaffRoutes)
 app.use('/api/v1/admin', AdminRoutes)
 
