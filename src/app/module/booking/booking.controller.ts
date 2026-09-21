@@ -8,7 +8,16 @@ import { BookingService } from './booking.service'
 
 const createBooking = catchAsync(async (req, res) => {
   const payload = createBookingSchema.parse(req.body)
-  const booking = await BookingService.createBooking(getAuthUser(req), payload)
+  const { booking, waitlistEntry } = await BookingService.createBooking(getAuthUser(req), payload)
+
+  // A full room answers 202: the request is accepted but the child holds a queue spot, not a seat.
+  if (waitlistEntry) {
+    return sendResponse(res, {
+      statusCode: httpStatus.ACCEPTED,
+      message: 'The room is full, so the child was added to the waitlist',
+      data: waitlistEntry,
+    })
+  }
 
   sendResponse(res, {
     statusCode: httpStatus.CREATED,

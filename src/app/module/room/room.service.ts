@@ -9,6 +9,7 @@ import {
 } from '../../../generated/prisma/enums'
 import { AppError } from '../../errorHelpers/AppError'
 import { prisma } from '../../lib/prisma'
+import { toIsoDate } from '../../utils/date'
 import type { TokenPayload } from '../../utils/jwt'
 import { buildMeta, getPagination } from '../../utils/pagination'
 import { END_AFTER_START_MESSAGE, isEndAfterStart } from '../staff/staff.interface'
@@ -46,7 +47,6 @@ const roomSelect = {
 
 const DAYS_IN_WEEK = 7
 const MS_PER_DAY = 24 * 60 * 60 * 1000
-const ISO_DATE_LENGTH = 'YYYY-MM-DD'.length
 
 // Index = Date#getUTCDay()
 export const WEEKDAYS = [
@@ -60,7 +60,7 @@ export const WEEKDAYS = [
 ]
 
 // Session dates are calendar dates (@db.Date), so they are compared as UTC midnights.
-const startOfUtcDay = (date: Date) =>
+export const startOfUtcDay = (date: Date) =>
   new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()))
 export const todayUtc = () => startOfUtcDay(new Date())
 
@@ -239,7 +239,7 @@ type RoomWithSeats = Awaited<ReturnType<typeof attachSeatsLeft<RoomRecord>>>[num
 
 const toRoomView = ({ sessionDate, ...room }: RoomWithSeats) => ({
   ...room,
-  sessionDate: sessionDate.toISOString().slice(0, ISO_DATE_LENGTH),
+  sessionDate: toIsoDate(sessionDate),
 })
 
 const SORT_KEYS: Record<

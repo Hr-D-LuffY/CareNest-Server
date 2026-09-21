@@ -4,6 +4,7 @@ import { BookingStatus, TransportStatus } from '../../../generated/prisma/enums'
 import { AppError } from '../../errorHelpers/AppError'
 import { calculateFare, hoursBetween } from '../../lib/fare.service'
 import { prisma } from '../../lib/prisma'
+import { toIsoDate } from '../../utils/date'
 import type { TokenPayload } from '../../utils/jwt'
 import { CHILD_NOT_FOUND_MESSAGE, getGuardianId } from '../child/child.service'
 import {
@@ -13,13 +14,13 @@ import {
   toSessionDate,
   WEEKDAYS,
 } from '../room/room.service'
+import { joinWaitlist } from '../waitlist/waitlist.service'
 import type { CreateBookingPayload } from './booking.interface'
 
 type Caller = Pick<TokenPayload, 'userId'>
 type TimeWindow = { startTime: string; endTime: string }
 
 const ACTIVE_BOOKING_STATUSES = [BookingStatus.PENDING, BookingStatus.CONFIRMED]
-const ISO_DATE_LENGTH = 'YYYY-MM-DD'.length
 
 const AUDIT_BOOKING_ENTITY = 'Booking'
 const AUDIT_BOOKING_CREATED = 'BOOKING_CREATED'
@@ -40,7 +41,7 @@ type BookingRecord = Prisma.BookingGetPayload<{ select: typeof bookingSelect }>
 
 const toBookingView = (booking: BookingRecord) => ({
   ...booking,
-  sessionDate: booking.sessionDate.toISOString().slice(0, ISO_DATE_LENGTH),
+  sessionDate: toIsoDate(booking.sessionDate),
 })
 
 const roomForBookingSelect = {
@@ -89,7 +90,7 @@ const createBooking = async (caller: Caller, payload: CreateBookingPayload) => {
   // Someone else's child gets the same 404 as a missing one, so ids can't be probed.
   const child = await prisma.child.findFirst({
     where: { id: childId, guardianId, isDeleted: false },
-    select: { id: true },
+    select: { id: true, tier: true },
   })
   if (!child) throw new AppError(httpStatus.NOT_FOUND, CHILD_NOT_FOUND_MESSAGE)
 
@@ -114,16 +115,13 @@ const createBooking = async (caller: Caller, payload: CreateBookingPayload) => {
     multiplier: room.priceMultiplier,
   })
 
-  const booking = await prisma.$transaction(async (tx) => {
+  // A full room queues the child instead of failing (SRS 4.6), so exactly one of `booking` and
+  // `waitlistEntry` comes back.
+  return prisma.$transaction(async (tx) => {
     await lockRow(tx, 'children', childId)
     await lockRow(tx, 'rooms', roomId)
 
     await assertNotDoubleBooked(tx, childId, sessionDate, room)
-
-    const [seated] = await attachSeatsLeft([room], sessionDate, tx)
-    if (!seated || seated.seatsLeft === 0) {
-      throw new AppError(httpStatus.CONFLICT, 'This room is full on that date')
-    }
 
     const { walletBalance } = await tx.guardianProfile.findUniqueOrThrow({
       where: { id: guardianId },
@@ -134,6 +132,18 @@ const createBooking = async (caller: Caller, payload: CreateBookingPayload) => {
         httpStatus.PAYMENT_REQUIRED,
         `Insufficient wallet balance. The estimated fee is ${estimatedFee}, your balance is ${walletBalance}`,
       )
+    }
+
+    const [seated] = await attachSeatsLeft([room], sessionDate, tx)
+    if (!seated || seated.seatsLeft === 0) {
+      const waitlistEntry = await joinWaitlist(tx, {
+        roomId,
+        childId,
+        guardianId,
+        sessionDate,
+        tier: child.tier,
+      })
+      return { booking: null, waitlistEntry }
     }
 
     const created = await tx.booking.create({
@@ -156,10 +166,8 @@ const createBooking = async (caller: Caller, payload: CreateBookingPayload) => {
         metadata: { status: created.status, roomId, childId },
       },
     })
-    return created
+    return { booking: toBookingView(created), waitlistEntry: null }
   })
-
-  return toBookingView(booking)
 }
 
 // Cancelling releases the seat (seatsLeft only counts CONFIRMED bookings) and stamps `cancelledAt`,
