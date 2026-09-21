@@ -8,7 +8,6 @@ import type { CreateChildPayload, ListChildrenQuery, UpdateChildPayload } from '
 
 type Caller = Pick<TokenPayload, 'userId'>
 
-const CHILD_NOT_FOUND_MESSAGE = 'Child not found'
 const ACTIVE_BOOKING_STATUSES = [BookingStatus.PENDING, BookingStatus.CONFIRMED]
 
 const childSelect = {
@@ -25,7 +24,8 @@ const childSelect = {
   updatedAt: true,
 } as const
 
-const getGuardianId = async ({ userId }: Caller) => {
+export const CHILD_NOT_FOUND_MESSAGE = 'Child not found'
+export const getGuardianId = async ({ userId }: Caller) => {
   const profile = await prisma.guardianProfile.findUnique({
     where: { userId },
     select: { id: true },

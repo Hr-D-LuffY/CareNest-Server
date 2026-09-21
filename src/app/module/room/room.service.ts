@@ -24,7 +24,7 @@ import type {
 type Caller = Pick<TokenPayload, 'userId'>
 type Schedule = { dayOfWeek: DayOfWeek; startTime: string; endTime: string }
 
-const ROOM_NOT_FOUND_MESSAGE = 'Room not found'
+export const ROOM_NOT_FOUND_MESSAGE = 'Room not found'
 const ACTIVE_BOOKING_STATUSES = [BookingStatus.PENDING, BookingStatus.CONFIRMED]
 
 const AUDIT_ROOM_ENTITY = 'Room'
@@ -49,7 +49,7 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000
 const ISO_DATE_LENGTH = 'YYYY-MM-DD'.length
 
 // Index = Date#getUTCDay()
-const WEEKDAYS = [
+export const WEEKDAYS = [
   DayOfWeek.SUNDAY,
   DayOfWeek.MONDAY,
   DayOfWeek.TUESDAY,
@@ -176,8 +176,7 @@ const nextSessionDate = (dayOfWeek: DayOfWeek) => {
   return new Date(today.getTime() + daysAhead * MS_PER_DAY)
 }
 
-const resolveRequestedDate = (date?: Date) => {
-  if (!date) return undefined
+export const toSessionDate = (date: Date) => {
   const sessionDate = startOfUtcDay(date)
   if (sessionDate < todayUtc()) {
     throw new AppError(httpStatus.BAD_REQUEST, 'Date cannot be in the past')
@@ -185,14 +184,22 @@ const resolveRequestedDate = (date?: Date) => {
   return sessionDate
 }
 
+const resolveRequestedDate = (date?: Date) => (date ? toSessionDate(date) : undefined)
+
 type RoomRecord = Awaited<ReturnType<typeof findRoomOrThrow>>
+type SeatedRoom = Pick<RoomRecord, 'id' | 'capacity' | 'dayOfWeek'>
 
 const seatKey = (roomId: string, sessionDate: Date) => `${roomId}|${sessionDate.getTime()}`
 
 // THE one place seatsLeft is computed (booking validation and waitlist promotion reuse it): seats
 // taken are the CONFIRMED bookings for that room on that session date. One grouped query serves
-// any number of rooms. Without `date`, each room is checked for its next upcoming session.
-export const attachSeatsLeft = async (rooms: RoomRecord[], date?: Date) => {
+// any number of rooms. Without `date`, each room is checked for its next upcoming session. Pass a
+// transaction client to count inside a transaction.
+export const attachSeatsLeft = async <T extends SeatedRoom>(
+  rooms: T[],
+  date?: Date,
+  client: Prisma.TransactionClient = prisma,
+) => {
   const sessions = rooms.map((room) => ({
     room,
     sessionDate: date ?? nextSessionDate(room.dayOfWeek),
@@ -204,7 +211,7 @@ export const attachSeatsLeft = async (rooms: RoomRecord[], date?: Date) => {
   const booked =
     rooms.length === 0
       ? []
-      : await prisma.booking.groupBy({
+      : await client.booking.groupBy({
           by: ['roomId', 'sessionDate'],
           where: {
             roomId: { in: rooms.map((room) => room.id) },
@@ -228,7 +235,7 @@ export const attachSeatsLeft = async (rooms: RoomRecord[], date?: Date) => {
   })
 }
 
-type RoomWithSeats = Awaited<ReturnType<typeof attachSeatsLeft>>[number]
+type RoomWithSeats = Awaited<ReturnType<typeof attachSeatsLeft<RoomRecord>>>[number]
 
 const toRoomView = ({ sessionDate, ...room }: RoomWithSeats) => ({
   ...room,
