@@ -17,6 +17,24 @@ export const calculateFare = ({
   multiplier?: Money
 }) => new Prisma.Decimal(units).mul(rate).mul(multiplier).toDecimalPlaces(MONEY_DECIMAL_PLACES)
 
+type CareFeeRoom = {
+  startTime: string
+  endTime: string
+  priceMultiplier: Money
+  staff: { hourlyRate: Money | null }
+}
+
+// Estimated care fee for one full session of a room; null while its staff has no hourly rate yet.
+// Booking creation and waitlist promotion both price a seat through this.
+export const estimateCareFee = ({ startTime, endTime, priceMultiplier, staff }: CareFeeRoom) => {
+  if (staff.hourlyRate === null) return null
+  return calculateFare({
+    units: hoursBetween(startTime, endTime),
+    rate: staff.hourlyRate,
+    multiplier: priceMultiplier,
+  })
+}
+
 const toMinutes = (time: string) => {
   const [hours = 0, minutes = 0] = time.split(':').map(Number)
   return hours * MINUTES_PER_HOUR + minutes

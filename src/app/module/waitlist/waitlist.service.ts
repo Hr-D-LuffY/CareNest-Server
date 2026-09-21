@@ -1,6 +1,6 @@
 import httpStatus from 'http-status'
 import type { Prisma } from '../../../generated/prisma/client'
-import { Role, type Tier, WaitlistStatus } from '../../../generated/prisma/enums'
+import { BookingStatus, Role, type Tier, WaitlistStatus } from '../../../generated/prisma/enums'
 import {
   CANCELLATION_WINDOW_DAYS,
   MAX_CANCELLATION_PENALTY,
@@ -8,17 +8,36 @@ import {
   WAITLIST_WEIGHTS,
 } from '../../constants/waitlist.constants'
 import { AppError } from '../../errorHelpers/AppError'
+import { findOverlappingBooking } from '../../lib/booking-guards'
+import { estimateCareFee } from '../../lib/fare.service'
 import { prisma } from '../../lib/prisma'
 import { toIsoDate } from '../../utils/date'
 import type { TokenPayload } from '../../utils/jwt'
 import { buildMeta, getPagination } from '../../utils/pagination'
-import { ROOM_NOT_FOUND_MESSAGE, startOfUtcDay } from '../room/room.service'
+import { attachSeatsLeft, ROOM_NOT_FOUND_MESSAGE, startOfUtcDay } from '../room/room.service'
 import type { ListRoomWaitlistQuery } from './waitlist.interface'
 
 type Caller = Pick<TokenPayload, 'userId' | 'role'>
 
 const MS_PER_HOUR = 60 * 60 * 1000
 const MS_PER_DAY = 24 * MS_PER_HOUR
+
+const AUDIT_WAITLIST_ENTITY = 'WaitlistEntry'
+const AUDIT_WAITLIST_PROMOTED = 'WAITLIST_PROMOTED'
+const AUDIT_WAITLIST_EXPIRED = 'WAITLIST_EXPIRED'
+
+const roomForPromotionSelect = {
+  id: true,
+  isDeleted: true,
+  capacity: true,
+  dayOfWeek: true,
+  startTime: true,
+  endTime: true,
+  priceMultiplier: true,
+  staff: { select: { hourlyRate: true } },
+} as const
+
+type RoomForPromotion = Prisma.RoomGetPayload<{ select: typeof roomForPromotionSelect }>
 
 const waitlistEntrySelect = {
   id: true,
@@ -103,6 +122,155 @@ export const joinWaitlist = async (
     select: waitlistEntrySelect,
   })
   return toEntryView(created)
+}
+
+// Recomputes the score of every PENDING entry for the room's session, saves it, and returns the
+// entries best-first (ties go to whoever joined earlier). A guardian's cancellation penalty is
+// counted once per guardian, not once per entry.
+const rerankWaitlist = async (tx: Prisma.TransactionClient, roomId: string, sessionDate: Date) => {
+  const entries = await tx.waitlistEntry.findMany({
+    where: { roomId, sessionDate, status: WaitlistStatus.PENDING },
+    select: {
+      id: true,
+      childId: true,
+      guardianId: true,
+      joinedAt: true,
+      child: { select: { tier: true, isDeleted: true } },
+    },
+  })
+
+  const now = new Date()
+  const guardianIds = [...new Set(entries.map((entry) => entry.guardianId))]
+  const penalties = new Map(
+    await Promise.all(
+      guardianIds.map(
+        async (guardianId) =>
+          [guardianId, await countRecentCancellations(tx, guardianId, now)] as const,
+      ),
+    ),
+  )
+
+  const ranked = entries
+    .map((entry) => ({
+      ...entry,
+      priorityScore: calculatePriorityScore({
+        joinedAt: entry.joinedAt,
+        tier: entry.child.tier,
+        cancellationPenalty: penalties.get(entry.guardianId) ?? 0,
+        now,
+      }),
+    }))
+    .sort(
+      (a, b) => b.priorityScore - a.priorityScore || a.joinedAt.getTime() - b.joinedAt.getTime(),
+    )
+
+  await Promise.all(
+    ranked.map(({ id, priorityScore }) =>
+      tx.waitlistEntry.update({ where: { id }, data: { priorityScore } }),
+    ),
+  )
+  return ranked
+}
+
+type RankedEntry = Awaited<ReturnType<typeof rerankWaitlist>>[number]
+
+// Why a top-ranked entry can't take the seat any more; it drops off the queue instead of blocking
+// everyone behind it. Null means it is still eligible.
+const findPromotionBlocker = async (
+  tx: Prisma.TransactionClient,
+  entry: RankedEntry,
+  room: RoomForPromotion,
+  sessionDate: Date,
+  estimatedFee: Prisma.Decimal,
+) => {
+  if (entry.child.isDeleted) return 'The child profile was removed'
+
+  const { walletBalance } = await tx.guardianProfile.findUniqueOrThrow({
+    where: { id: entry.guardianId },
+    select: { walletBalance: true },
+  })
+  if (walletBalance.lt(estimatedFee)) return 'Insufficient wallet balance'
+
+  const clash = await findOverlappingBooking(tx, entry.childId, sessionDate, room)
+  if (clash) return 'The child holds an overlapping booking'
+  return null
+}
+
+const expireEntry = async (tx: Prisma.TransactionClient, entryId: string, reason: string) => {
+  await tx.waitlistEntry.update({
+    where: { id: entryId },
+    data: { status: WaitlistStatus.EXPIRED },
+  })
+  await tx.auditLog.create({
+    data: {
+      action: AUDIT_WAITLIST_EXPIRED,
+      entity: AUDIT_WAITLIST_ENTITY,
+      entityId: entryId,
+      metadata: { reason },
+    },
+  })
+}
+
+const promoteEntry = async (
+  tx: Prisma.TransactionClient,
+  entry: RankedEntry,
+  roomId: string,
+  sessionDate: Date,
+  estimatedFee: Prisma.Decimal,
+) => {
+  const booking = await tx.booking.create({
+    data: {
+      childId: entry.childId,
+      roomId,
+      guardianId: entry.guardianId,
+      sessionDate,
+      status: BookingStatus.CONFIRMED,
+      estimatedFee,
+    },
+    select: { id: true },
+  })
+  await tx.waitlistEntry.update({
+    where: { id: entry.id },
+    data: { status: WaitlistStatus.PROMOTED, promotedAt: new Date(), bookingId: booking.id },
+  })
+  // The audit row is the promotion notice for now; the email goes out once notifications exist.
+  await tx.auditLog.create({
+    data: {
+      action: AUDIT_WAITLIST_PROMOTED,
+      entity: AUDIT_WAITLIST_ENTITY,
+      entityId: entry.id,
+      metadata: { bookingId: booking.id, roomId, priorityScore: entry.priorityScore },
+    },
+  })
+}
+
+// Fills the seats a cancellation freed from the room's waitlist (SRS 4.7): re-rank every PENDING
+// entry, then walk the ranking best-first, promoting into a CONFIRMED booking until the room is
+// full again. Runs inside the caller's transaction, which must already hold the room's row lock so
+// two cancellations can't hand out the same seat. Entries that can no longer take the seat expire.
+export const promoteFromWaitlist = async (
+  tx: Prisma.TransactionClient,
+  { roomId, sessionDate }: { roomId: string; sessionDate: Date },
+) => {
+  const room = await tx.room.findUnique({ where: { id: roomId }, select: roomForPromotionSelect })
+  if (!room || room.isDeleted) return
+
+  const [seated] = await attachSeatsLeft([room], sessionDate, tx)
+  let seatsLeft = seated?.seatsLeft ?? 0
+  const estimatedFee = estimateCareFee(room)
+  if (seatsLeft === 0 || !estimatedFee) return
+
+  for (const entry of await rerankWaitlist(tx, roomId, sessionDate)) {
+    if (seatsLeft === 0) break
+
+    const blocker = await findPromotionBlocker(tx, entry, room, sessionDate, estimatedFee)
+    if (blocker) {
+      await expireEntry(tx, entry.id, blocker)
+      continue
+    }
+    await promoteEntry(tx, entry, roomId, sessionDate, estimatedFee)
+    seatsLeft -= 1
+  }
 }
 
 // Staff see the queue of the rooms they run; admins see any room's queue. Someone else's room gets

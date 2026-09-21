@@ -2,7 +2,8 @@ import httpStatus from 'http-status'
 import type { Prisma } from '../../../generated/prisma/client'
 import { BookingStatus, TransportStatus } from '../../../generated/prisma/enums'
 import { AppError } from '../../errorHelpers/AppError'
-import { calculateFare, hoursBetween } from '../../lib/fare.service'
+import { ACTIVE_BOOKING_STATUSES, assertNotDoubleBooked, lockRow } from '../../lib/booking-guards'
+import { estimateCareFee } from '../../lib/fare.service'
 import { prisma } from '../../lib/prisma'
 import { toIsoDate } from '../../utils/date'
 import type { TokenPayload } from '../../utils/jwt'
@@ -14,13 +15,10 @@ import {
   toSessionDate,
   WEEKDAYS,
 } from '../room/room.service'
-import { joinWaitlist } from '../waitlist/waitlist.service'
+import { joinWaitlist, promoteFromWaitlist } from '../waitlist/waitlist.service'
 import type { CreateBookingPayload } from './booking.interface'
 
 type Caller = Pick<TokenPayload, 'userId'>
-type TimeWindow = { startTime: string; endTime: string }
-
-const ACTIVE_BOOKING_STATUSES = [BookingStatus.PENDING, BookingStatus.CONFIRMED]
 
 const AUDIT_BOOKING_ENTITY = 'Booking'
 const AUDIT_BOOKING_CREATED = 'BOOKING_CREATED'
@@ -54,35 +52,6 @@ const roomForBookingSelect = {
   staff: { select: { hourlyRate: true } },
 } as const
 
-// Locks the row until the transaction ends, so two concurrent requests queue up behind each other
-// instead of both passing the same check.
-const lockRow = (tx: Prisma.TransactionClient, table: 'rooms' | 'children', id: string) =>
-  tx.$queryRawUnsafe(`SELECT id FROM ${table} WHERE id = $1 FOR UPDATE`, id)
-
-// A child can't hold two seats whose time windows overlap on the same date (SRS 4.6).
-const assertNotDoubleBooked = async (
-  tx: Prisma.TransactionClient,
-  childId: string,
-  sessionDate: Date,
-  { startTime, endTime }: TimeWindow,
-) => {
-  const clash = await tx.booking.findFirst({
-    where: {
-      childId,
-      sessionDate,
-      status: { in: ACTIVE_BOOKING_STATUSES },
-      room: { startTime: { lt: endTime }, endTime: { gt: startTime } },
-    },
-    select: { room: { select: { name: true, startTime: true, endTime: true } } },
-  })
-  if (clash) {
-    throw new AppError(
-      httpStatus.CONFLICT,
-      `The child already has a booking in "${clash.room.name}" (${clash.room.startTime}-${clash.room.endTime}) at that time`,
-    )
-  }
-}
-
 const createBooking = async (caller: Caller, payload: CreateBookingPayload) => {
   const { childId, roomId } = payload
   const guardianId = await getGuardianId(caller)
@@ -105,15 +74,10 @@ const createBooking = async (caller: Caller, payload: CreateBookingPayload) => {
     throw new AppError(httpStatus.BAD_REQUEST, `This room runs on ${room.dayOfWeek}s`)
   }
 
-  const { hourlyRate } = room.staff
-  if (hourlyRate === null) {
+  const estimatedFee = estimateCareFee(room)
+  if (!estimatedFee) {
     throw new AppError(httpStatus.CONFLICT, 'This room has no hourly rate set yet, try again later')
   }
-  const estimatedFee = calculateFare({
-    units: hoursBetween(room.startTime, room.endTime),
-    rate: hourlyRate,
-    multiplier: room.priceMultiplier,
-  })
 
   // A full room queues the child instead of failing (SRS 4.6), so exactly one of `booking` and
   // `waitlistEntry` comes back.
@@ -170,9 +134,10 @@ const createBooking = async (caller: Caller, payload: CreateBookingPayload) => {
   })
 }
 
-// Cancelling releases the seat (seatsLeft only counts CONFIRMED bookings) and stamps `cancelledAt`,
-// which feeds the waitlist cancellation penalty (SRS 4.7). The status flip is a conditional
-// update, so a double-click or a concurrent check-in can't cancel the same booking twice.
+// Cancelling releases the seat (seatsLeft only counts CONFIRMED bookings), stamps `cancelledAt`,
+// which feeds the waitlist cancellation penalty, and then hands the freed seat to the top-ranked
+// waitlist entry, all in one transaction (SRS 4.7). The status flip is a conditional update, so a
+// double-click or a concurrent check-in can't cancel the same booking twice.
 const cancelBooking = async (caller: Caller, bookingId: string) => {
   const guardianId = await getGuardianId(caller)
 
@@ -194,6 +159,7 @@ const cancelBooking = async (caller: Caller, bookingId: string) => {
   }
 
   const cancelled = await prisma.$transaction(async (tx) => {
+    await lockRow(tx, 'rooms', booking.roomId)
     const { count } = await tx.booking.updateMany({
       where: { id: bookingId, status: { in: ACTIVE_BOOKING_STATUSES }, checkinLog: null },
       data: { status: BookingStatus.CANCELLED, cancelledAt: new Date() },
@@ -216,6 +182,8 @@ const cancelBooking = async (caller: Caller, bookingId: string) => {
         metadata: { from: booking.status, to: BookingStatus.CANCELLED, roomId: booking.roomId },
       },
     })
+
+    await promoteFromWaitlist(tx, { roomId: booking.roomId, sessionDate: booking.sessionDate })
 
     return tx.booking.findUniqueOrThrow({ where: { id: bookingId }, select: bookingSelect })
   })
