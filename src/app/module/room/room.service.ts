@@ -62,7 +62,7 @@ export const WEEKDAYS = [
 // Session dates are calendar dates (@db.Date), so they are compared as UTC midnights.
 const startOfUtcDay = (date: Date) =>
   new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()))
-const todayUtc = () => startOfUtcDay(new Date())
+export const todayUtc = () => startOfUtcDay(new Date())
 
 const findRoomOrThrow = async (roomId: string) => {
   const room = await prisma.room.findFirst({

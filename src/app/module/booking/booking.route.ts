@@ -6,5 +6,6 @@ import { BookingController } from './booking.controller'
 const router = Router()
 
 router.post('/', auth(Role.GUARDIAN), BookingController.createBooking)
+router.delete('/:id', auth(Role.GUARDIAN), BookingController.cancelBooking)
 
 export const BookingRoutes = router

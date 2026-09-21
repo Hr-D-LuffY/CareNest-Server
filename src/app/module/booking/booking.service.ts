@@ -1,6 +1,6 @@
 import httpStatus from 'http-status'
 import type { Prisma } from '../../../generated/prisma/client'
-import { BookingStatus } from '../../../generated/prisma/enums'
+import { BookingStatus, TransportStatus } from '../../../generated/prisma/enums'
 import { AppError } from '../../errorHelpers/AppError'
 import { calculateFare, hoursBetween } from '../../lib/fare.service'
 import { prisma } from '../../lib/prisma'
@@ -9,6 +9,7 @@ import { CHILD_NOT_FOUND_MESSAGE, getGuardianId } from '../child/child.service'
 import {
   attachSeatsLeft,
   ROOM_NOT_FOUND_MESSAGE,
+  todayUtc,
   toSessionDate,
   WEEKDAYS,
 } from '../room/room.service'
@@ -22,6 +23,8 @@ const ISO_DATE_LENGTH = 'YYYY-MM-DD'.length
 
 const AUDIT_BOOKING_ENTITY = 'Booking'
 const AUDIT_BOOKING_CREATED = 'BOOKING_CREATED'
+const AUDIT_BOOKING_CANCELLED = 'BOOKING_CANCELLED'
+const BOOKING_NOT_FOUND_MESSAGE = 'Booking not found'
 
 const bookingSelect = {
   id: true,
@@ -32,6 +35,13 @@ const bookingSelect = {
   child: { select: { id: true, name: true } },
   room: { select: { id: true, name: true, dayOfWeek: true, startTime: true, endTime: true } },
 } as const
+
+type BookingRecord = Prisma.BookingGetPayload<{ select: typeof bookingSelect }>
+
+const toBookingView = (booking: BookingRecord) => ({
+  ...booking,
+  sessionDate: booking.sessionDate.toISOString().slice(0, ISO_DATE_LENGTH),
+})
 
 const roomForBookingSelect = {
   id: true,
@@ -149,7 +159,59 @@ const createBooking = async (caller: Caller, payload: CreateBookingPayload) => {
     return created
   })
 
-  return { ...booking, sessionDate: booking.sessionDate.toISOString().slice(0, ISO_DATE_LENGTH) }
+  return toBookingView(booking)
 }
 
-export const BookingService = { createBooking }
+// Cancelling releases the seat (seatsLeft only counts CONFIRMED bookings) and stamps `cancelledAt`,
+// which feeds the waitlist cancellation penalty (SRS 4.7). The status flip is a conditional
+// update, so a double-click or a concurrent check-in can't cancel the same booking twice.
+const cancelBooking = async (caller: Caller, bookingId: string) => {
+  const guardianId = await getGuardianId(caller)
+
+  // Someone else's booking gets the same 404 as a missing one, so ids can't be probed.
+  const booking = await prisma.booking.findFirst({
+    where: { id: bookingId, guardianId },
+    select: { id: true, status: true, sessionDate: true, roomId: true, checkinLog: true },
+  })
+  if (!booking) throw new AppError(httpStatus.NOT_FOUND, BOOKING_NOT_FOUND_MESSAGE)
+
+  if (!ACTIVE_BOOKING_STATUSES.some((status) => status === booking.status)) {
+    throw new AppError(httpStatus.CONFLICT, `A ${booking.status} booking cannot be cancelled`)
+  }
+  if (booking.checkinLog || booking.sessionDate < todayUtc()) {
+    throw new AppError(
+      httpStatus.CONFLICT,
+      'This session has already started or passed and cannot be cancelled',
+    )
+  }
+
+  const cancelled = await prisma.$transaction(async (tx) => {
+    const { count } = await tx.booking.updateMany({
+      where: { id: bookingId, status: { in: ACTIVE_BOOKING_STATUSES }, checkinLog: null },
+      data: { status: BookingStatus.CANCELLED, cancelledAt: new Date() },
+    })
+    if (count === 0) {
+      throw new AppError(httpStatus.CONFLICT, 'This booking can no longer be cancelled')
+    }
+
+    // A ride only exists to serve its booking.
+    await tx.transportBooking.updateMany({
+      where: { bookingId, status: TransportStatus.REQUESTED },
+      data: { status: TransportStatus.CANCELLED },
+    })
+    await tx.auditLog.create({
+      data: {
+        userId: caller.userId,
+        action: AUDIT_BOOKING_CANCELLED,
+        entity: AUDIT_BOOKING_ENTITY,
+        entityId: bookingId,
+        metadata: { from: booking.status, to: BookingStatus.CANCELLED, roomId: booking.roomId },
+      },
+    })
+
+    return tx.booking.findUniqueOrThrow({ where: { id: bookingId }, select: bookingSelect })
+  })
+  return toBookingView(cancelled)
+}
+
+export const BookingService = { createBooking, cancelBooking }
