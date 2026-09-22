@@ -2,6 +2,7 @@ import httpStatus from 'http-status'
 import { Prisma } from '../../../generated/prisma/client'
 import { BookingStatus, StaffType, TransportStatus } from '../../../generated/prisma/enums'
 import { AppError } from '../../errorHelpers/AppError'
+import { deleteImage, uploadImageBuffer } from '../../lib/cloudinary'
 import { prisma } from '../../lib/prisma'
 import type { TokenPayload } from '../../utils/jwt'
 import { buildMeta, getPagination } from '../../utils/pagination'
@@ -30,6 +31,7 @@ export const staffSelect = {
   verificationStatus: true,
   verifiedAt: true,
   rejectionReason: true,
+  verificationDocument: true,
   createdAt: true,
   updatedAt: true,
   user: { select: { id: true, name: true, email: true, profilePhoto: true } },
@@ -53,6 +55,30 @@ const updateMyProfile = async (caller: Caller, { name, bio, experience }: Update
     data: { bio, experience, user: { update: { name } } },
     select: staffSelect,
   })
+}
+
+// publicId isn't part of staffSelect (it's an internal Cloudinary detail, not a public field), so
+// it's fetched separately here, just for cleaning up the document it's about to replace.
+const uploadMyVerificationDocument = async (caller: Caller, file: Express.Multer.File) => {
+  const staff = await prisma.staffProfile.findFirst({
+    where: { userId: caller.userId, isDeleted: false },
+    select: { id: true, verificationDocumentPublicId: true },
+  })
+  if (!staff) throw new AppError(httpStatus.NOT_FOUND, STAFF_NOT_FOUND_MESSAGE)
+
+  const { url, publicId } = await uploadImageBuffer(
+    file.buffer,
+    `carenest/staff-documents/${staff.id}`,
+  )
+  const updated = await prisma.staffProfile.update({
+    where: { id: staff.id },
+    data: { verificationDocument: url, verificationDocumentPublicId: publicId },
+    select: staffSelect,
+  })
+
+  // Only clean up the old document once the new one is safely saved.
+  if (staff.verificationDocumentPublicId) await deleteImage(staff.verificationDocumentPublicId)
+  return updated
 }
 
 const SLOT_NOT_FOUND_MESSAGE = 'Availability slot not found'
@@ -302,6 +328,7 @@ const getMyEarnings = async (caller: Caller, { from, to }: EarningsQuery) => {
 export const StaffService = {
   getMyProfile,
   updateMyProfile,
+  uploadMyVerificationDocument,
   listMyBookings,
   listMyTrips,
   getMyEarnings,

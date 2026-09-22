@@ -1,12 +1,19 @@
 import { Router } from 'express'
 import { Role } from '../../../generated/prisma/enums'
 import { auth } from '../../middleware/checkAuth'
+import { uploadImage } from '../../middleware/upload'
 import { StaffController } from './staff.controller'
 
 const router = Router()
 
 router.get('/me', auth(Role.STAFF), StaffController.getMyProfile)
 router.patch('/me', auth(Role.STAFF), StaffController.updateMyProfile)
+router.post(
+  '/me/verification-document',
+  auth(Role.STAFF),
+  uploadImage.single('document'),
+  StaffController.uploadMyVerificationDocument,
+)
 router.get('/me/bookings', auth(Role.STAFF), StaffController.listMyBookings)
 router.get('/me/trips', auth(Role.STAFF), StaffController.listMyTrips)
 router.get('/me/earnings', auth(Role.STAFF), StaffController.getMyEarnings)

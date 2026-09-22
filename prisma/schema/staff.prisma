@@ -10,9 +10,11 @@ model StaffProfile {
   hourlyRate    Decimal? @db.Decimal(10, 2) // sitters (and BOTH)
   perMinuteRate Decimal? @db.Decimal(10, 2) // drivers (and BOTH)
 
-  verificationStatus VerificationStatus @default(UNVERIFIED)
-  verifiedAt         DateTime?
-  rejectionReason    String?
+  verificationStatus           VerificationStatus @default(UNVERIFIED)
+  verifiedAt                   DateTime?
+  rejectionReason              String?
+  verificationDocument         String? // Cloudinary secure_url, what the admin reviews
+  verificationDocumentPublicId String? // needed later to delete or replace the old document
 
   isDeleted Boolean   @default(false)
   deletedAt DateTime?

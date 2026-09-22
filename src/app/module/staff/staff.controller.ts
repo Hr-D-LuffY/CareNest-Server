@@ -1,4 +1,5 @@
 import httpStatus from 'http-status'
+import { AppError } from '../../errorHelpers/AppError'
 import { catchAsync } from '../../utils/catchAsync'
 import { getAuthUser } from '../../utils/getAuthUser'
 import { sendResponse } from '../../utils/sendResponse'
@@ -30,6 +31,17 @@ const updateMyProfile = catchAsync(async (req, res) => {
   sendResponse(res, {
     statusCode: httpStatus.OK,
     message: 'Staff profile updated successfully',
+    data: staff,
+  })
+})
+
+const uploadMyVerificationDocument = catchAsync(async (req, res) => {
+  if (!req.file) throw new AppError(httpStatus.BAD_REQUEST, 'A document file is required')
+  const staff = await StaffService.uploadMyVerificationDocument(getAuthUser(req), req.file)
+
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    message: 'Verification document uploaded successfully',
     data: staff,
   })
 })
@@ -118,6 +130,7 @@ const deleteMySlot = catchAsync(async (req, res) => {
 export const StaffController = {
   getMyProfile,
   updateMyProfile,
+  uploadMyVerificationDocument,
   listMyBookings,
   listMyTrips,
   getMyEarnings,
