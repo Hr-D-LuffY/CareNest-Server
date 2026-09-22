@@ -6,6 +6,7 @@ import { sendResponse } from '../../utils/sendResponse'
 import { idParamSchema } from '../../utils/validation'
 import {
   createStaffSchema,
+  listAuditLogsQuerySchema,
   listStaffQuerySchema,
   updateStaffSchema,
   verifyStaffSchema,
@@ -84,6 +85,28 @@ const deleteStaff = catchAsync(async (req, res) => {
   })
 })
 
+const getDashboardStats = catchAsync(async (_req, res) => {
+  const stats = await AdminService.getDashboardStats()
+
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    message: 'Dashboard stats retrieved successfully',
+    data: stats,
+  })
+})
+
+const listAuditLogs = catchAsync(async (req, res) => {
+  const query = listAuditLogsQuerySchema.parse(req.query)
+  const { items, meta } = await AdminService.listAuditLogs(query)
+
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    message: 'Audit logs retrieved successfully',
+    data: items,
+    meta,
+  })
+})
+
 export const AdminController = {
   createStaff,
   listStaff,
@@ -91,4 +114,6 @@ export const AdminController = {
   updateStaff,
   verifyStaff,
   deleteStaff,
+  getDashboardStats,
+  listAuditLogs,
 }

@@ -74,7 +74,15 @@ export const listStaffQuerySchema = z.object({
   search: z.string().trim().min(1).optional(),
 })
 
+// AuditLog.entity is a free-form string (e.g. "Booking", "StaffProfile"), not an enum, so this
+// filters by exact match rather than a fixed list.
+export const listAuditLogsQuerySchema = z.object({
+  ...paginationQueryShape,
+  entity: z.string().trim().min(1).optional(),
+})
+
 export type CreateStaffPayload = z.infer<typeof createStaffSchema>
 export type UpdateStaffPayload = z.infer<typeof updateStaffSchema>
 export type VerifyStaffPayload = z.infer<typeof verifyStaffSchema>
 export type ListStaffQuery = z.infer<typeof listStaffQuerySchema>
+export type ListAuditLogsQuery = z.infer<typeof listAuditLogsQuerySchema>
