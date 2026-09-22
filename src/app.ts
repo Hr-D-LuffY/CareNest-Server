@@ -3,6 +3,7 @@ import cors from 'cors'
 import express, { type Request, type Response } from 'express'
 import helmet from 'helmet'
 import httpStatus from 'http-status'
+import { config } from './app/config'
 import { globalErrorHandler } from './app/middleware/globalErrorHandler'
 import { notFound } from './app/middleware/notFound'
 import { rateLimiter } from './app/middleware/rateLimiter'
@@ -32,7 +33,7 @@ const AUTH_RATE_LIMIT = { windowSeconds: FIFTEEN_MINUTES_IN_SECONDS, max: 20 }
 const app = express()
 
 app.use(helmet())
-app.use(cors())
+app.use(cors({ origin: config.frontendUrl, credentials: true }))
 app.use(express.json())
 app.use(express.urlencoded({ extended: true }))
 app.use(cookieParser())
