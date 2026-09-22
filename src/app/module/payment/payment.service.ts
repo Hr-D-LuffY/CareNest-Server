@@ -2,10 +2,14 @@ import { randomUUID } from 'node:crypto'
 import httpStatus from 'http-status'
 import { Prisma } from '../../../generated/prisma/client'
 import { PaymentStatus } from '../../../generated/prisma/enums'
-import { BKASH_STATUS_COMPLETED, PAYMENT_CURRENCY } from '../../constants/payment.constants'
 import { AppError } from '../../errorHelpers/AppError'
 import { lockRow } from '../../lib/booking-guards'
-import { createBkashPayment, executeBkashPayment, queryBkashPayment } from '../../lib/bkash.service'
+import {
+  createBkashPayment,
+  executeBkashPayment,
+  PAYMENT_CURRENCY,
+  queryBkashPayment,
+} from '../../lib/bkash.service'
 import { prisma } from '../../lib/prisma'
 import { creditWallet } from '../../lib/wallet.service'
 import type { TokenPayload } from '../../utils/jwt'
@@ -21,6 +25,7 @@ const AUDIT_TOPUP_FAILED = 'WALLET_TOPUP_FAILED'
 const AUDIT_TOPUP_CANCELLED = 'WALLET_TOPUP_CANCELLED'
 const INVOICE_PREFIX = 'CN'
 const TOP_UP_DESCRIPTION = 'Wallet top-up via bKash'
+const BKASH_STATUS_COMPLETED = 'Completed'
 
 const initiateTopUp = async (caller: Caller, { amount }: TopUpPayload) => {
   const guardianId = await getGuardianId(caller)

@@ -50,3 +50,24 @@ export const redisDel = async (key: string) => {
     console.error(`Redis del(${key}) failed, the cached value will stay until it expires:`, error)
   }
 }
+
+// Atomic fixed-window counter for rate limiting: INCR the key, and on the first hit in a window
+// set it to expire so the count resets on its own. Returns null (never 0) when Redis isn't
+// configured or unreachable, so callers can fail open instead of rate-limiting on a guess.
+export const redisIncrWithExpiry = async (
+  key: string,
+  ttlSeconds: number,
+): Promise<number | null> => {
+  try {
+    const connected = await getConnectedClient()
+    if (!connected) return null
+    const count = await connected.incr(key)
+    if (count === 1) {
+      await connected.expire(key, ttlSeconds)
+    }
+    return count
+  } catch (error) {
+    console.error(`Redis incr(${key}) failed, request will not be rate-limited:`, error)
+    return null
+  }
+}

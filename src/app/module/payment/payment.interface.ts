@@ -1,6 +1,7 @@
 import { z } from 'zod'
-import { TOP_UP_MAX_AMOUNT, TOP_UP_MIN_AMOUNT } from '../../constants/payment.constants'
 
+const TOP_UP_MIN_AMOUNT = 10
+const TOP_UP_MAX_AMOUNT = 25000
 const CENTS = 100
 // 10.15 * 100 is 1014.9999999999999 in floating point; rounding to this many places absorbs that.
 const FLOAT_TOLERANCE_DIGITS = 6

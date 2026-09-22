@@ -1,12 +1,6 @@
 import httpStatus from 'http-status'
 import type { Prisma } from '../../../generated/prisma/client'
-import { BookingStatus, Role, type Tier, WaitlistStatus } from '../../../generated/prisma/enums'
-import {
-  CANCELLATION_WINDOW_DAYS,
-  MAX_CANCELLATION_PENALTY,
-  TIER_WEIGHTS,
-  WAITLIST_WEIGHTS,
-} from '../../constants/waitlist.constants'
+import { BookingStatus, Role, Tier, WaitlistStatus } from '../../../generated/prisma/enums'
 import { AppError } from '../../errorHelpers/AppError'
 import { findOverlappingBooking } from '../../lib/booking-guards'
 import { estimateCareFee } from '../../lib/fare.service'
@@ -25,6 +19,23 @@ const MS_PER_DAY = 24 * MS_PER_HOUR
 const AUDIT_WAITLIST_ENTITY = 'WaitlistEntry'
 const AUDIT_WAITLIST_PROMOTED = 'WAITLIST_PROMOTED'
 const AUDIT_WAITLIST_EXPIRED = 'WAITLIST_EXPIRED'
+
+// priorityScore = (W1 x waitTimeHours) + (W2 x tierWeight) - (W3 x cancellationPenalty), SRS 4.7
+const WAITLIST_WEIGHTS = {
+  waitTimeHours: 0.5,
+  tier: 0.3,
+  cancellationPenalty: 0.4,
+} as const
+
+const TIER_WEIGHTS: Record<Tier, number> = {
+  [Tier.MONTHLY]: 3,
+  [Tier.WEEKLY]: 2,
+  [Tier.DAILY]: 1,
+}
+
+// Only this many recent cancellations count against a guardian, over this many days.
+const MAX_CANCELLATION_PENALTY = 5
+const CANCELLATION_WINDOW_DAYS = 30
 
 const roomForPromotionSelect = {
   id: true,

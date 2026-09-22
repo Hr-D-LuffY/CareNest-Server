@@ -1,16 +1,18 @@
 import httpStatus from 'http-status'
 import { z } from 'zod'
 import { config } from '../config'
-import {
-  BKASH_CHECKOUT_MODE,
-  BKASH_INTENT,
-  BKASH_NOT_CONFIGURED_MESSAGE,
-  BKASH_REQUEST_TIMEOUT_MS,
-  BKASH_SUCCESS_CODE,
-  BKASH_TOKEN_EXPIRY_BUFFER_MS,
-  PAYMENT_CURRENCY,
-} from '../constants/payment.constants'
 import { AppError } from '../errorHelpers/AppError'
+
+// bKash Tokenized Checkout: `mode 0011` is checkout with a redirect, `intent sale` charges at once.
+const BKASH_CHECKOUT_MODE = '0011'
+const BKASH_INTENT = 'sale'
+const BKASH_SUCCESS_CODE = '0000'
+const BKASH_REQUEST_TIMEOUT_MS = 15_000
+// Refresh the cached id_token this long before bKash says it expires.
+const BKASH_TOKEN_EXPIRY_BUFFER_MS = 60_000
+const BKASH_NOT_CONFIGURED_MESSAGE = 'bKash payments are not configured on this server'
+// Exported: payment.service.ts also needs it when creating the Payment row and won't duplicate it.
+export const PAYMENT_CURRENCY = 'BDT'
 
 const grantTokenResponseSchema = z.object({
   id_token: z.string().min(1),
