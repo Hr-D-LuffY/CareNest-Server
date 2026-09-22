@@ -1,6 +1,7 @@
 import httpStatus from 'http-status'
 import { BookingStatus, WaitlistStatus } from '../../../generated/prisma/enums'
 import { AppError } from '../../errorHelpers/AppError'
+import { deleteImage, uploadImageBuffer } from '../../lib/cloudinary'
 import { prisma } from '../../lib/prisma'
 import type { TokenPayload } from '../../utils/jwt'
 import { buildMeta, getPagination } from '../../utils/pagination'
@@ -144,10 +145,33 @@ const deleteMyChild = async (caller: Caller, childId: string) => {
   })
 }
 
+// publicId isn't part of childSelect (it's an internal Cloudinary detail, not a public field), so
+// it's fetched separately here, just for cleaning up the image it's about to replace.
+const uploadChildPhoto = async (caller: Caller, childId: string, file: Express.Multer.File) => {
+  const guardianId = await getGuardianId(caller)
+  const child = await prisma.child.findFirst({
+    where: { id: childId, guardianId, isDeleted: false },
+    select: { profilePhotoPublicId: true },
+  })
+  if (!child) throw new AppError(httpStatus.NOT_FOUND, CHILD_NOT_FOUND_MESSAGE)
+
+  const { url, publicId } = await uploadImageBuffer(file.buffer, `carenest/children/${childId}`)
+  const updated = await prisma.child.update({
+    where: { id: childId },
+    data: { profilePhoto: url, profilePhotoPublicId: publicId },
+    select: childSelect,
+  })
+
+  // Only clean up the old image once the new one is safely saved.
+  if (child.profilePhotoPublicId) await deleteImage(child.profilePhotoPublicId)
+  return updated
+}
+
 export const ChildService = {
   createChild,
   listMyChildren,
   getMyChild,
   updateMyChild,
   deleteMyChild,
+  uploadChildPhoto,
 }

@@ -1,4 +1,5 @@
 import httpStatus from 'http-status'
+import { AppError } from '../../errorHelpers/AppError'
 import { clearAuthCookies } from '../../utils/authCookies'
 import { catchAsync } from '../../utils/catchAsync'
 import { getAuthUser } from '../../utils/getAuthUser'
@@ -39,4 +40,20 @@ const deleteMyAccount = catchAsync(async (req, res) => {
   })
 })
 
-export const GuardianController = { getMyProfile, updateMyProfile, deleteMyAccount }
+const uploadMyPhoto = catchAsync(async (req, res) => {
+  if (!req.file) throw new AppError(httpStatus.BAD_REQUEST, 'A photo file is required')
+  const guardian = await GuardianService.uploadMyPhoto(getAuthUser(req), req.file)
+
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    message: 'Profile photo updated successfully',
+    data: guardian,
+  })
+})
+
+export const GuardianController = {
+  getMyProfile,
+  updateMyProfile,
+  deleteMyAccount,
+  uploadMyPhoto,
+}

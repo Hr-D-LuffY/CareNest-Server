@@ -1,4 +1,5 @@
 import httpStatus from 'http-status'
+import { AppError } from '../../errorHelpers/AppError'
 import { catchAsync } from '../../utils/catchAsync'
 import { getAuthUser } from '../../utils/getAuthUser'
 import { sendResponse } from '../../utils/sendResponse'
@@ -64,10 +65,26 @@ const deleteMyChild = catchAsync(async (req, res) => {
   })
 })
 
+const uploadChildPhoto = catchAsync(async (req, res) => {
+  if (!req.file) throw new AppError(httpStatus.BAD_REQUEST, 'A photo file is required')
+  const child = await ChildService.uploadChildPhoto(
+    getAuthUser(req),
+    idParamSchema.parse(req.params).id,
+    req.file,
+  )
+
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    message: 'Child profile photo updated successfully',
+    data: child,
+  })
+})
+
 export const ChildController = {
   createChild,
   listMyChildren,
   getMyChild,
   updateMyChild,
   deleteMyChild,
+  uploadChildPhoto,
 }

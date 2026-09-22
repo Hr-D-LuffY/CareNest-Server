@@ -1,5 +1,6 @@
 import type { ErrorRequestHandler } from 'express'
 import httpStatus from 'http-status'
+import multer from 'multer'
 import { z } from 'zod'
 import { Prisma } from '../../generated/prisma/client'
 import { config } from '../config'
@@ -73,6 +74,9 @@ const normalizeError = (error: unknown): NormalizedError => {
   }
   if (error instanceof Prisma.PrismaClientValidationError) {
     return { statusCode: httpStatus.BAD_REQUEST, message: 'Invalid query input', errors: [] }
+  }
+  if (error instanceof multer.MulterError) {
+    return { statusCode: httpStatus.BAD_REQUEST, message: error.message, errors: [] }
   }
   if (isClientHttpError(error)) {
     return { statusCode: error.statusCode, message: error.message, errors: [] }

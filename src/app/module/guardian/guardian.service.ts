@@ -1,5 +1,6 @@
 import httpStatus from 'http-status'
 import { AppError } from '../../errorHelpers/AppError'
+import { deleteImage, uploadImageBuffer } from '../../lib/cloudinary'
 import { prisma } from '../../lib/prisma'
 import type { TokenPayload } from '../../utils/jwt'
 import type { UpdateGuardianPayload } from './guardian.interface'
@@ -56,4 +57,28 @@ const deleteMyAccount = async ({ userId }: Pick<TokenPayload, 'userId'>) => {
   })
 }
 
-export const GuardianService = { getMyProfile, updateMyProfile, deleteMyAccount }
+// publicId isn't part of guardianSelect (it's an internal Cloudinary detail, not a public field),
+// so it's fetched separately here, just for cleaning up the image it's about to replace.
+const uploadMyPhoto = async (
+  { userId }: Pick<TokenPayload, 'userId'>,
+  file: Express.Multer.File,
+) => {
+  const current = await prisma.user.findFirst({
+    where: { id: userId, isDeleted: false, guardianProfile: { isNot: null } },
+    select: { profilePhotoPublicId: true },
+  })
+  if (!current) throw new AppError(httpStatus.NOT_FOUND, GUARDIAN_NOT_FOUND_MESSAGE)
+
+  const { url, publicId } = await uploadImageBuffer(file.buffer, `carenest/users/${userId}`)
+  const updated = await prisma.user.update({
+    where: { id: userId },
+    data: { profilePhoto: url, profilePhotoPublicId: publicId },
+    select: guardianSelect,
+  })
+
+  // Only clean up the old image once the new one is safely saved.
+  if (current.profilePhotoPublicId) await deleteImage(current.profilePhotoPublicId)
+  return updated
+}
+
+export const GuardianService = { getMyProfile, updateMyProfile, deleteMyAccount, uploadMyPhoto }
