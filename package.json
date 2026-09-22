@@ -1,9 +1,10 @@
 {
-  "name": "CareNest-Trusted care for your little ones  SERVER",
+  "name": "carenest-server",
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
   "scripts": {
+    "postinstall": "prisma generate",
     "dev": "tsx watch src/server.ts",
     "build": "tsup",
     "start": "node dist/server.js",
