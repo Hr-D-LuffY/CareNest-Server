@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { StaffType, VerificationStatus } from '../../../generated/prisma/enums'
+import { Role, StaffType, VerificationStatus } from '../../../generated/prisma/enums'
 import { paginationQueryShape } from '../../utils/pagination'
 import { atLeastOneField, updateBodySchema } from '../../utils/validation'
 import { passwordSchema } from '../auth/auth.interface'
@@ -81,8 +81,23 @@ export const listAuditLogsQuerySchema = z.object({
   entity: z.string().trim().min(1).optional(),
 })
 
+export const listUsersQuerySchema = z.object({
+  ...paginationQueryShape,
+  role: z.enum(Role).optional(),
+})
+
+// ADMIN is deliberately not offered here — accounts with that role come from the seed script
+// only, never from an API (see AGENTS.md), so the service also rejects it if it slips through.
+export const updateUserRoleSchema = z.object({
+  role: z.enum([Role.GUARDIAN, Role.STAFF], {
+    error: 'Role must be one of: GUARDIAN, STAFF',
+  }),
+})
+
 export type CreateStaffPayload = z.infer<typeof createStaffSchema>
 export type UpdateStaffPayload = z.infer<typeof updateStaffSchema>
 export type VerifyStaffPayload = z.infer<typeof verifyStaffSchema>
 export type ListStaffQuery = z.infer<typeof listStaffQuerySchema>
 export type ListAuditLogsQuery = z.infer<typeof listAuditLogsQuerySchema>
+export type ListUsersQuery = z.infer<typeof listUsersQuerySchema>
+export type UpdateUserRolePayload = z.infer<typeof updateUserRoleSchema>

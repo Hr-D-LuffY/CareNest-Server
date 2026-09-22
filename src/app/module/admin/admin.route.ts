@@ -15,4 +15,7 @@ router.delete('/staff/:id', auth(Role.ADMIN), AdminController.deleteStaff)
 router.get('/dashboard-stats', auth(Role.ADMIN), AdminController.getDashboardStats)
 router.get('/audit-logs', auth(Role.ADMIN), AdminController.listAuditLogs)
 
+router.get('/users', auth(Role.ADMIN), AdminController.listUsers)
+router.patch('/users/:id/role', auth(Role.ADMIN), AdminController.updateUserRole)
+
 export const AdminRoutes = router

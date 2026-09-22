@@ -8,7 +8,9 @@ import {
   createStaffSchema,
   listAuditLogsQuerySchema,
   listStaffQuerySchema,
+  listUsersQuerySchema,
   updateStaffSchema,
+  updateUserRoleSchema,
   verifyStaffSchema,
 } from './admin.interface'
 import { AdminService } from './admin.service'
@@ -107,6 +109,33 @@ const listAuditLogs = catchAsync(async (req, res) => {
   })
 })
 
+const listUsers = catchAsync(async (req, res) => {
+  const query = listUsersQuerySchema.parse(req.query)
+  const { items, meta } = await AdminService.listUsers(query)
+
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    message: 'Users retrieved successfully',
+    data: items,
+    meta,
+  })
+})
+
+const updateUserRole = catchAsync(async (req, res) => {
+  const payload = updateUserRoleSchema.parse(req.body)
+  const user = await AdminService.updateUserRole(
+    getAuthUser(req),
+    idParamSchema.parse(req.params).id,
+    payload,
+  )
+
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    message: 'User role updated successfully',
+    data: user,
+  })
+})
+
 export const AdminController = {
   createStaff,
   listStaff,
@@ -116,4 +145,6 @@ export const AdminController = {
   deleteStaff,
   getDashboardStats,
   listAuditLogs,
+  listUsers,
+  updateUserRole,
 }
