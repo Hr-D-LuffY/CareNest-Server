@@ -28,7 +28,7 @@ import type {
 type Caller = Pick<TokenPayload, 'userId'>
 
 // Flat charge every ride starts from; the trip fare is baseFare + minutes x the driver's
-// perMinuteRate (SRS 4.9). A guardian must hold at least this much to request a ride.
+// perMinuteRate. A guardian must hold at least this much to request a ride.
 const TRANSPORT_BASE_FARE = 50
 
 const AUDIT_TRANSPORT_ENTITY = 'TransportBooking'

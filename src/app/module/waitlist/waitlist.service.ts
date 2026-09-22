@@ -20,7 +20,7 @@ const AUDIT_WAITLIST_ENTITY = 'WaitlistEntry'
 const AUDIT_WAITLIST_PROMOTED = 'WAITLIST_PROMOTED'
 const AUDIT_WAITLIST_EXPIRED = 'WAITLIST_EXPIRED'
 
-// priorityScore = (W1 x waitTimeHours) + (W2 x tierWeight) - (W3 x cancellationPenalty), SRS 4.7
+// priorityScore = (W1 x waitTimeHours) + (W2 x tierWeight) - (W3 x cancellationPenalty)
 const WAITLIST_WEIGHTS = {
   waitTimeHours: 0.5,
   tier: 0.3,
@@ -67,7 +67,7 @@ const toEntryView = (entry: WaitlistEntryRecord) => ({
   sessionDate: toIsoDate(entry.sessionDate),
 })
 
-// The guardian's cancellations inside the last 30 days, capped at 5 (SRS 4.7).
+// The guardian's cancellations inside the last 30 days, capped at 5.
 export const countRecentCancellations = async (
   client: Prisma.TransactionClient,
   guardianId: string,
@@ -255,7 +255,7 @@ const promoteEntry = async (
   })
 }
 
-// Fills the seats a cancellation freed from the room's waitlist (SRS 4.7): re-rank every PENDING
+// Fills the seats a cancellation freed from the room's waitlist: re-rank every PENDING
 // entry, then walk the ranking best-first, promoting into a CONFIRMED booking until the room is
 // full again. Runs inside the caller's transaction, which must already hold the room's row lock so
 // two cancellations can't hand out the same seat. Entries that can no longer take the seat expire.

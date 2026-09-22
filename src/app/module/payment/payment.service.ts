@@ -175,7 +175,7 @@ const creditConfirmedPayment = async (payment: PendingPayment, details: Confirme
   })
 }
 
-// Where bKash sends the guardian after checkout (SRS 4.9). The `status` in the URL is only a hint,
+// Where bKash sends the guardian after checkout. The `status` in the URL is only a hint,
 // since anyone can type that URL: a payment is credited solely when bKash itself confirms it via
 // Execute/Query Payment. Safe to call repeatedly; a settled payment is returned as it is.
 const handleBkashCallback = async ({ paymentID, status }: BkashCallbackQuery) => {
@@ -207,7 +207,7 @@ const handleBkashCallback = async ({ paymentID, status }: BkashCallbackQuery) =>
   return findPaymentResult(payment.id)
 }
 
-// The guardian polls their own payment while (or after) paying on bKash (SRS 4.3). Someone else's
+// The guardian polls their own payment while (or after) paying on bKash. Someone else's
 // payment gets the same 404 as a missing one, so ids can't be probed.
 const getMyPayment = async (caller: Caller, paymentId: string) => {
   const guardianId = await getGuardianId(caller)

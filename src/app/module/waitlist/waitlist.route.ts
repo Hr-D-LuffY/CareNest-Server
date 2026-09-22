@@ -5,7 +5,7 @@ import { WaitlistController } from './waitlist.controller'
 
 const router = Router()
 
-// Mounted under /room, so this is GET /room/:id/waitlist (SRS section 6).
+// Mounted under /room, so this is GET /room/:id/waitlist.
 router.get('/:id/waitlist', auth(Role.STAFF, Role.ADMIN), WaitlistController.listRoomWaitlist)
 
 export const WaitlistRoutes = router

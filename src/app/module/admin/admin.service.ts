@@ -351,7 +351,7 @@ const listUsers = async (query: ListUsersQuery) => {
   return { items, meta: buildMeta(query, total) }
 }
 
-// Corrective role changes only (SRS 4.11 / §admin/users/:id/role), logged to the audit trail.
+// Corrective role changes only, logged to the audit trail.
 // ADMIN is off-limits in both directions — it's seed-only (AGENTS.md) — and the destination
 // profile (GuardianProfile/StaffProfile) must already exist, so this can never leave a user with
 // a role that has no matching profile, and never substitutes for POST /admin/staff.

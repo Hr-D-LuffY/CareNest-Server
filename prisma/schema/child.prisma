@@ -7,7 +7,7 @@ model Child {
   dateOfBirth DateTime
   tier        Tier
 
-  // medical info (SRS 4.2)
+  // medical info
   allergies             String?
   conditions            String?
   emergencyContactName  String

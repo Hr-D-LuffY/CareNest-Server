@@ -19,7 +19,7 @@ model Booking {
   estimatedFee Decimal       @db.Decimal(12, 2)
   finalFee     Decimal?      @db.Decimal(12, 2) // set at check-out
 
-  // set when the wallet could not cover the fee at check-out (SRS 4.8)
+  // set when the wallet could not cover the fee at check-out
   insufficientBalance Boolean @default(false)
 
   createdAt DateTime @default(now())

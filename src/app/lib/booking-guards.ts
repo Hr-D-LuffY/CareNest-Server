@@ -15,7 +15,7 @@ export const lockRow = (
   id: string,
 ) => tx.$queryRawUnsafe(`SELECT id FROM ${table} WHERE id = $1 FOR UPDATE`, id)
 
-// The active booking that overlaps this time window for the child on that date, if any (SRS 4.6).
+// The active booking that overlaps this time window for the child on that date, if any.
 export const findOverlappingBooking = (
   tx: Prisma.TransactionClient,
   childId: string,
@@ -32,7 +32,7 @@ export const findOverlappingBooking = (
     select: { room: { select: { name: true, startTime: true, endTime: true } } },
   })
 
-// A child can't hold two seats whose time windows overlap on the same date (SRS 4.6).
+// A child can't hold two seats whose time windows overlap on the same date.
 export const assertNotDoubleBooked = async (
   tx: Prisma.TransactionClient,
   childId: string,

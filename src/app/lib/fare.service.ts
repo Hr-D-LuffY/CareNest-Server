@@ -5,7 +5,7 @@ const MONEY_DECIMAL_PLACES = 2
 
 type Money = Prisma.Decimal | number
 
-// The one fare formula (SRS 4.8, 4.9): units x rate x modifier. Care fees use hours x hourlyRate x
+// The one fare formula: units x rate x modifier. Care fees use hours x hourlyRate x
 // price multiplier; transport fares reuse it with minutes x perMinuteRate.
 export const calculateFare = ({
   units,

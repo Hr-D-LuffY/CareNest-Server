@@ -92,7 +92,7 @@ const createBooking = async (caller: Caller, payload: CreateBookingPayload) => {
     throw new AppError(httpStatus.CONFLICT, 'This room has no hourly rate set yet, try again later')
   }
 
-  // A full room queues the child instead of failing (SRS 4.6), so exactly one of `booking` and
+  // A full room queues the child instead of failing, so exactly one of `booking` and
   // `waitlistEntry` comes back.
   const result = await prisma.$transaction(async (tx) => {
     await lockRow(tx, 'children', childId)
@@ -273,7 +273,7 @@ const findBookingInMyRoom = async (staffId: string, bookingId: string) => {
   return booking
 }
 
-// Staff logs the actual arrival (SRS 4.8). Only on the session day, once per booking. The room lock
+// Staff logs the actual arrival. Only on the session day, once per booking. The room lock
 // is the same one cancelBooking takes, so a cancellation and a check-in can't both succeed.
 const checkIn = async (caller: Caller, bookingId: string) => {
   const staffId = await getMySitterId(caller)
@@ -314,7 +314,7 @@ const checkIn = async (caller: Caller, bookingId: string) => {
   return toCheckinLogView(log)
 }
 
-// Staff logs the actual departure (SRS 4.8): stamps `checkOutAt`, stores `hoursUsed`, prices the
+// Staff logs the actual departure: stamps `checkOutAt`, stores `hoursUsed`, prices the
 // stay (hoursUsed x hourlyRate x priceMultiplier) and debits the guardian's wallet, completing the
 // booking. If the wallet can't cover it, nothing is debited and the booking is flagged
 // `insufficientBalance` instead, so staff can still release the child. The conditional update on

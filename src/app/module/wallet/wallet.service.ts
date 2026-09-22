@@ -18,7 +18,7 @@ const transactionSelect = {
   createdAt: true,
 } as const
 
-// The guardian's own ledger, newest first (SRS 4.3). `amount` is always positive; `type` says
+// The guardian's own ledger, newest first. `amount` is always positive; `type` says
 // whether it was a top-up or a spend, and `balanceAfter` is the wallet balance right after it.
 const listMyTransactions = async (caller: Caller, query: ListTransactionsQuery) => {
   const guardianId = await getGuardianId(caller)

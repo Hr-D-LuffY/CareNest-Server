@@ -74,7 +74,7 @@ const findRoomOrThrow = async (roomId: string) => {
   return room
 }
 
-// Only a verified sitter (SITTER or BOTH) may run a care room (SRS 4.1).
+// Only a verified sitter (SITTER or BOTH) may run a care room.
 const assertStaffCanRun = async (staffId: string) => {
   const staff = await prisma.staffProfile.findFirst({
     where: { id: staffId, isDeleted: false },
@@ -89,7 +89,7 @@ const assertStaffCanRun = async (staffId: string) => {
   }
 }
 
-// The room's window must sit inside the staff member's weekly availability (SRS 4.4). Adjacent
+// The room's window must sit inside the staff member's weekly availability. Adjacent
 // slots (09:00-12:00 + 12:00-14:00) count as one continuous stretch.
 const assertWithinAvailability = async (
   staffId: string,
@@ -414,7 +414,7 @@ const updateRoom = async (roomId: string, payload: UpdateRoomPayload) => {
 }
 
 // Soft delete. Refused while children hold upcoming seats or wait in the queue; the deletion and
-// its audit row (SRS 7.4) commit together.
+// its audit row commit together.
 const deleteRoom = async (caller: Caller, roomId: string) => {
   const room = await findRoomOrThrow(roomId)
 
