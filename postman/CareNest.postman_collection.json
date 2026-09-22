@@ -1,0 +1,5428 @@
+{
+  "info": {
+    "name": "CareNest API",
+    "description": "Childcare & Transport Care Management Platform — B7A6 backend assignment.\n\nGuardians book children into supervised care rooms run by verified staff, top up a wallet via real bKash Tokenized Checkout, book supervised transport, and rate staff. The core differentiator is a weighted waitlist priority engine that re-ranks and auto-promotes queued bookings on cancellation (see folders 7 and 8).\n\n## How to run this\n1. Start the API locally (`npm run dev`) or point `baseUrl` at a deployed instance.\n2. Run `npx prisma db seed` at least once so the demo Admin account (`admin@carenest.com` / `CareNest@Admin2026`) exists.\n3. Use the Collection Runner and run folders 1 through 14 top-to-bottom — folder 4 (Admin creates the Staff/Driver accounts) runs before folder 5 (Staff self-service logs into them). Folder 12 has two requests that need a real browser + bKash sandbox and are excluded from automated runs. Folder 14 is destructive (soft-deletes the demo Guardian and a Room) and deliberately sits at the very end — every other folder depends on records folder 14 removes.\n4. Every response uses the standard envelope: `{ success, message, data }` on success, `{ success: false, message, errors: [] }` on error — HTTP status carries the code, never the body.\n\n## Roles\nGUARDIAN (self-registers), STAFF (SITTER | DRIVER | BOTH — created only by an Admin), ADMIN (seed-only, never via any API).\n\n## Why cookies are disabled on this collection\nThe API sets httpOnly auth cookies on every login response, for real browsers. `POST /auth/refresh-token` deliberately checks that cookie *before* the request body (`getRefreshToken` in `auth.controller.ts` — \"Cookie first (browsers), request body second (Postman / mobile clients)\"). Postman's automatic cookie jar would otherwise silently clobber the `{{guardianAccessToken}}` flow the moment a second role logs in (its Set-Cookie overwrites the jar), so this collection disables cookie handling and relies purely on the Bearer token variables instead — exactly the \"API client\" path the backend was built to support.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "protocolProfileBehavior": {
+    "disableCookies": true
+  },
+  "item": [
+    {
+      "name": "1. Auth",
+      "item": [
+        {
+          "name": "Register Guardian",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Postman Guardian\",\n  \"email\": \"{{guardianEmail}}\",\n  \"password\": \"{{guardianPassword}}\",\n  \"phone\": \"01700000001\",\n  \"address\": \"12 Test Street, Dhaka\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/register",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "register"
+              ]
+            },
+            "description": "Public. Only GUARDIAN accounts self-register — there is no `role` field. A pre-request script generates a unique email each run so this can be re-run without a 409."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  if (!pm.collectionVariables.get('guardianEmail')) {",
+                  "    pm.collectionVariables.set('guardianEmail', 'guardian_' + Date.now() + '@example.com');",
+                  "  }",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 201', () => pm.response.to.have.status(201));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "  pm.test('Role is GUARDIAN', () => pm.expect(pm.response.json().data.role).to.eql('GUARDIAN'));",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Register Guardian - Duplicate Email (409)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Dup\",\n  \"email\": \"{{guardianEmail}}\",\n  \"password\": \"Passw0rd!123\",\n  \"phone\": \"01700000009\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/register",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "register"
+              ]
+            },
+            "description": "Same email as the previous request. Demonstrates the conflict envelope."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 409', () => pm.response.to.have.status(409));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Register Guardian - Invalid Payload (400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"\",\n  \"email\": \"not-an-email\",\n  \"phone\": \"\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/register",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "register"
+              ]
+            },
+            "description": "Missing password, blank name, invalid email, blank phone — shows the structured validation error array."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 400', () => pm.response.to.have.status(400));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Register Guardian 2 (for ownership/waitlist tests)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Postman Guardian 2\",\n  \"email\": \"{{guardian2Email}}\",\n  \"password\": \"{{guardian2Password}}\",\n  \"phone\": \"01700000002\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/register",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "register"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  if (!pm.collectionVariables.get('guardian2Email')) {",
+                  "    pm.collectionVariables.set('guardian2Email', 'guardian2_' + Date.now() + '@example.com');",
+                  "  }",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 201', () => pm.response.to.have.status(201));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login Guardian",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{guardianEmail}}\",\n  \"password\": \"{{guardianPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "description": "Sets `guardianAccessToken` / `guardianRefreshToken` collection variables for every later Guardian request."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "  const data = pm.response.json().data;",
+                  "  pm.collectionVariables.set('guardianAccessToken', data.accessToken);",
+                  "  pm.collectionVariables.set('guardianRefreshToken', data.refreshToken);",
+                  "  pm.collectionVariables.set('guardianUserId', data.user.id);",
+                  "  pm.test('Role is GUARDIAN', () => pm.expect(data.user.role).to.eql('GUARDIAN'));",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login Guardian 2",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{guardian2Email}}\",\n  \"password\": \"{{guardian2Password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "  const data = pm.response.json().data;",
+                  "  pm.collectionVariables.set('guardian2AccessToken', data.accessToken);",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login - Wrong Password (401)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{guardianEmail}}\",\n  \"password\": \"totally-wrong-password\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "description": "Same message as an unknown email — the API never reveals which emails are registered."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 401', () => pm.response.to.have.status(401));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login Admin (seed account)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{adminEmail}}\",\n  \"password\": \"{{adminPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "description": "Demo Admin credentials created by `npx prisma db seed` — see the project README for details."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "  const data = pm.response.json().data;",
+                  "  pm.collectionVariables.set('adminAccessToken', data.accessToken);",
+                  "  pm.collectionVariables.set('adminUserId', data.user.id);",
+                  "  pm.test('Role is ADMIN', () => pm.expect(data.user.role).to.eql('ADMIN'));",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Refresh Token",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{guardianRefreshToken}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/refresh-token",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "refresh-token"
+              ]
+            },
+            "description": "Normally the refresh token travels as an httpOnly cookie set at login; the body field is the fallback for non-browser clients like Postman. Rotates both tokens."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "  const data = pm.response.json().data;",
+                  "  pm.collectionVariables.set('guardianAccessToken', data.accessToken);",
+                  "  pm.collectionVariables.set('guardianRefreshToken', data.refreshToken);",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Google Login (manual only)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idToken\": \"<paste a real Google ID token here>\",\n  \"phone\": \"01700000099\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/google",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "google"
+              ]
+            },
+            "description": "Cannot be automated in Postman — `idToken` must be a real Google-issued ID token from GCP Sign-In on a frontend. Included to document the request shape. A verified Google email matching an existing password account links to it instead of creating a new one."
+          },
+          "event": []
+        },
+        {
+          "name": "Logout",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{guardianRefreshToken}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/logout",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "logout"
+              ]
+            },
+            "description": "Idempotent. Clears the stored refresh-token hash so that token can no longer be used to refresh."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "description": "Registration is Guardian-only. Staff accounts are created exclusively by an Admin (see 6. Admin > Staff Management), and the Admin account itself only ever comes from `npx prisma db seed`. Run \"Login Guardian\" and \"Login Admin\" before other folders — their tokens are reused everywhere via collection variables."
+    },
+    {
+      "name": "2. Guardian",
+      "item": [
+        {
+          "name": "Get My Profile",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{guardianAccessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/guardian/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "guardian",
+                "me"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "  const gp = pm.response.json().data.guardianProfile; pm.collectionVariables.set('guardianId', gp.id);",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get My Profile - No Token (401)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/guardian/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "guardian",
+                "me"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 401', () => pm.response.to.have.status(401));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get My Profile - Wrong Role (403)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminAccessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/guardian/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "guardian",
+                "me"
+              ]
+            },
+            "description": "An Admin token hitting a Guardian-only route."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 403', () => pm.response.to.have.status(403));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Update My Profile",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{guardianAccessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"address\": \"99 Updated Ave, Dhaka\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/guardian/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "guardian",
+                "me"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Update My Profile - Empty Body (400)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{guardianAccessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/guardian/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "guardian",
+                "me"
+              ]
+            },
+            "description": "atLeastOneField refinement rejects an empty PATCH."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 400', () => pm.response.to.have.status(400));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Upload My Photo (manual - attach a file)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{guardianAccessToken}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "photo",
+                  "type": "file",
+                  "src": [],
+                  "description": "Attach a JPEG/PNG/WEBP under 5MB"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/guardian/me/photo",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "guardian",
+                "me",
+                "photo"
+              ]
+            },
+            "description": "⚠️ Excluded from automated runs — Postman/newman cannot attach a real file without a human in the loop. Open this request, attach an image in the Body tab, then Send manually to see a real `res.cloudinary.com` URL come back."
+          },
+          "event": []
+        }
+      ],
+      "description": "Self-service profile endpoints for the currently logged-in Guardian. \"Delete My Account\" moved to 14. Cleanup — every later folder still needs this Guardian to be logged in."
+    },
+    {
+      "name": "3. Child",
+      "item": [
+        {
+          "name": "Create Child 1",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{guardianAccessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Kid One\",\n  \"dateOfBirth\": \"2020-03-15\",\n  \"tier\": \"DAILY\",\n  \"allergies\": \"peanuts\",\n  \"emergencyContactName\": \"Grandma\",\n  \"emergencyContactPhone\": \"01711111111\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/child",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "child"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 201', () => pm.response.to.have.status(201));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "  pm.collectionVariables.set('childId', pm.response.json().data.id);",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create Child 2 (for delete demo)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{guardianAccessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Kid Two\",\n  \"dateOfBirth\": \"2021-06-01\",\n  \"tier\": \"WEEKLY\",\n  \"emergencyContactName\": \"Uncle\",\n  \"emergencyContactPhone\": \"01722222222\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/child",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "child"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 201', () => pm.response.to.have.status(201));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "  pm.collectionVariables.set('child2Id', pm.response.json().data.id);",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create Guardian 2's Child",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{guardian2AccessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"G2 Kid\",\n  \"dateOfBirth\": \"2020-09-01\",\n  \"tier\": \"DAILY\",\n  \"emergencyContactName\": \"Aunt\",\n  \"emergencyContactPhone\": \"01733333333\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/child",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "child"
+              ]
+            },
+            "description": "Used later to demonstrate waitlist join when guardian2 books into a full room."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 201', () => pm.response.to.have.status(201));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "  pm.collectionVariables.set('guardian2ChildId', pm.response.json().data.id);",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List My Children",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{guardianAccessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/child?page=1&limit=10",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "child"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1",
+                  "disabled": false
+                },
+                {
+                  "key": "limit",
+                  "value": "10",
+                  "disabled": false
+                }
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List My Children - Filter by Tier",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{guardianAccessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/child?tier=DAILY",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "child"
+              ],
+              "query": [
+                {
+                  "key": "tier",
+                  "value": "DAILY",
+                  "disabled": false
+                }
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get Child by Id",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{guardianAccessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/child/{{childId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "child",
+                "{{childId}}"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get Child - Not Found (404)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{guardianAccessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/child/00000000-0000-0000-0000-000000000000",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "child",
+                "00000000-0000-0000-0000-000000000000"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 404', () => pm.response.to.have.status(404));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get Child - Another Guardian's Child (404)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{guardian2AccessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/child/{{childId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "child",
+                "{{childId}}"
+              ]
+            },
+            "description": "Ownership check: someone else's child id gets the same 404 as a missing one."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 404', () => pm.response.to.have.status(404));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Update Child",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{guardianAccessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"allergies\": \"peanuts, shellfish\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/child/{{childId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "child",
+                "{{childId}}"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Upload Child's Photo (manual - attach a file)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{guardianAccessToken}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "photo",
+                  "type": "file",
+                  "src": [],
+                  "description": "Attach a JPEG/PNG/WEBP under 5MB"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/child/{{childId}}/photo",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "child",
+                "{{childId}}",
+                "photo"
+              ]
+            },
+            "description": "⚠️ Excluded from automated runs — attach a file manually before sending."
+          },
+          "event": []
+        },
+        {
+          "name": "Delete Child 2 (soft delete)",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{guardianAccessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/child/{{child2Id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "child",
+                "{{child2Id}}"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get Deleted Child (404)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{guardianAccessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/child/{{child2Id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "child",
+                "{{child2Id}}"
+              ]
+            },
+            "description": "Soft-deleted children 404 like any other missing record."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 404', () => pm.response.to.have.status(404));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "description": "Children belong to exactly one Guardian. Every read/write is scoped to the caller's own children — cross-guardian access returns 404, never 403, so ids can't be probed."
+    },
+    {
+      "name": "4. Admin - Staff Management",
+      "item": [
+        {
+          "name": "Create Staff - Sitter",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminAccessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Postman Sitter\",\n  \"email\": \"{{staffEmail}}\",\n  \"staffType\": \"SITTER\",\n  \"password\": \"Passw0rd!123\",\n  \"hourlyRate\": 300,\n  \"experience\": 3\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/admin/staff",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "staff"
+              ]
+            },
+            "description": "Admin-only. This is the ONLY way a Staff account is ever created — no public endpoint can do this."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  if (!pm.collectionVariables.get('staffEmail')) { pm.collectionVariables.set('staffEmail', 'sitter_' + Date.now() + '@example.com'); }",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 201', () => pm.response.to.have.status(201));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "  pm.collectionVariables.set('staffId', pm.response.json().data.id);",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create Staff - Driver",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminAccessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Postman Driver\",\n  \"email\": \"{{driverEmail}}\",\n  \"staffType\": \"DRIVER\",\n  \"password\": \"Passw0rd!123\",\n  \"perMinuteRate\": 6\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/admin/staff",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "staff"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  if (!pm.collectionVariables.get('driverEmail')) { pm.collectionVariables.set('driverEmail', 'driver_' + Date.now() + '@example.com'); }",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 201', () => pm.response.to.have.status(201));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "  pm.collectionVariables.set('driverId', pm.response.json().data.id);",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create Staff - Missing Required Rate (400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminAccessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Bad Sitter\",\n  \"email\": \"bad_{{$timestamp}}@example.com\",\n  \"staffType\": \"SITTER\",\n  \"password\": \"Passw0rd!123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/admin/staff",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "staff"
+              ]
+            },
+            "description": "SITTER requires hourlyRate; omitting it fails validation."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 400', () => pm.response.to.have.status(400));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create Staff - As Guardian (403)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{guardianAccessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"X\",\n  \"email\": \"x_{{$timestamp}}@example.com\",\n  \"staffType\": \"SITTER\",\n  \"password\": \"Passw0rd!123\",\n  \"hourlyRate\": 100\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/admin/staff",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "staff"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 403', () => pm.response.to.have.status(403));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List Staff",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminAccessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/staff?page=1&limit=10&verificationStatus=UNVERIFIED&staffType=SITTER&search=Postman",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "staff"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1",
+                  "disabled": false
+                },
+                {
+                  "key": "limit",
+                  "value": "10",
+                  "disabled": false
+                },
+                {
+                  "key": "verificationStatus",
+                  "value": "UNVERIFIED",
+                  "disabled": true
+                },
+                {
+                  "key": "staffType",
+                  "value": "SITTER",
+                  "disabled": true
+                },
+                {
+                  "key": "search",
+                  "value": "Postman",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get Staff by Id",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminAccessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/staff/{{staffId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "staff",
+                "{{staffId}}"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Update Staff",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminAccessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"experience\": 5\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/admin/staff/{{staffId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "staff",
+                "{{staffId}}"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Verify Staff - Sitter",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminAccessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"VERIFIED\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/admin/staff/{{staffId}}/verify",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "staff",
+                "{{staffId}}",
+                "verify"
+              ]
+            },
+            "description": "Unverified staff cannot run a room or accept trips. Review \"Upload My Verification Document\" from the Staff folder before approving."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Verify Staff - Driver",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminAccessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"VERIFIED\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/admin/staff/{{driverId}}/verify",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "staff",
+                "{{driverId}}",
+                "verify"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Verify Staff - Already That Status (409)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminAccessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"VERIFIED\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/admin/staff/{{staffId}}/verify",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "staff",
+                "{{staffId}}",
+                "verify"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 409', () => pm.response.to.have.status(409));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create Staff - Disposable (for reject/delete demo)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminAccessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Disposable Driver\",\n  \"email\": \"disposable_{{$timestamp}}@example.com\",\n  \"staffType\": \"DRIVER\",\n  \"password\": \"Passw0rd!123\",\n  \"perMinuteRate\": 4\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/admin/staff",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "staff"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 201', () => pm.response.to.have.status(201));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "  pm.collectionVariables.set('disposableStaffId', pm.response.json().data.id);",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Reject Staff (example)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminAccessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"REJECTED\",\n  \"rejectionReason\": \"Document photo is not legible\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/admin/staff/{{disposableStaffId}}/verify",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "staff",
+                "{{disposableStaffId}}",
+                "verify"
+              ]
+            },
+            "description": "Runs against the disposable staff, not {{staffId}}/{{driverId}} — those two stay VERIFIED for every later folder that needs them (Room, Booking, Transport)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Delete Staff - Disposable",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminAccessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/staff/{{disposableStaffId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "staff",
+                "{{disposableStaffId}}"
+              ]
+            },
+            "description": "Deleting staff who still run a room or have open trips fails with 409 instead — try this endpoint against {{staffId}} to see that guard."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "description": "Admin-only staff lifecycle: create, list/search, update, verify/reject, delete. This is the sole path by which a STAFF account can exist."
+    },
+    {
+      "name": "5. Staff (self-service)",
+      "item": [
+        {
+          "name": "Login Staff (Sitter)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{staffEmail}}\",\n  \"password\": \"{{staffPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "description": "Run \"5. Admin > Staff Management > Create Staff - Sitter\" first so {{staffEmail}} exists."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "  const data = pm.response.json().data;",
+                  "  pm.collectionVariables.set('staffAccessToken', data.accessToken);",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login Staff (Driver)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{driverEmail}}\",\n  \"password\": \"{{driverPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "description": "Run \"5. Admin > Staff Management > Create Staff - Driver\" first so {{driverEmail}} exists."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "  const data = pm.response.json().data;",
+                  "  pm.collectionVariables.set('driverAccessToken', data.accessToken);",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get My Staff Profile",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{staffAccessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/staff/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "staff",
+                "me"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Update My Staff Profile",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{staffAccessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"bio\": \"Five years of experience with toddlers.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/staff/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "staff",
+                "me"
+              ]
+            },
+            "description": "Staff can only edit name, bio and experience — type/rates/verification are Admin-managed."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Upload My Verification Document (manual - attach a file)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{staffAccessToken}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "document",
+                  "type": "file",
+                  "src": [],
+                  "description": "A photo of an ID document, JPEG/PNG/WEBP under 5MB"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/staff/me/verification-document",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "staff",
+                "me",
+                "verification-document"
+              ]
+            },
+            "description": "⚠️ Excluded from automated runs — attach a file manually before sending. What an Admin reviews before verifying this staff member (see 4. Admin - Staff Management > Verify Staff)."
+          },
+          "event": []
+        },
+        {
+          "name": "Create Availability Slot",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{staffAccessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"dayOfWeek\": \"{{todayDayOfWeek}}\",\n  \"startTime\": \"00:00\",\n  \"endTime\": \"23:59\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/staff/availability",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "staff",
+                "availability"
+              ]
+            },
+            "description": "Wide-open slot for today's weekday so the Room/Booking demos below always line up, whatever day this collection is run on."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  if (!pm.collectionVariables.get('todayDayOfWeek')) {",
+                  "    const days = ['SUNDAY','MONDAY','TUESDAY','WEDNESDAY','THURSDAY','FRIDAY','SATURDAY'];",
+                  "    const now = new Date();",
+                  "    pm.collectionVariables.set('todayDayOfWeek', days[now.getUTCDay()]);",
+                  "    pm.collectionVariables.set('todaySessionDate', now.toISOString().slice(0, 10));",
+                  "  }",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 201', () => pm.response.to.have.status(201));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "  pm.collectionVariables.set('availabilitySlotId', pm.response.json().data.id);",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create Availability Slot - Overlapping (409)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{staffAccessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"dayOfWeek\": \"{{todayDayOfWeek}}\",\n  \"startTime\": \"10:00\",\n  \"endTime\": \"12:00\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/staff/availability",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "staff",
+                "availability"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 409', () => pm.response.to.have.status(409));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get Staff's Availability (public)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{guardianAccessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/staff/{{staffId}}/availability",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "staff",
+                "{{staffId}}",
+                "availability"
+              ]
+            },
+            "description": "Any logged-in user (guardians and admins) can see when staff are free."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Update Availability Slot",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{staffAccessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"startTime\": \"00:00\",\n  \"endTime\": \"23:00\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/staff/availability/{{availabilitySlotId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "staff",
+                "availability",
+                "{{availabilitySlotId}}"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get My Assigned Bookings",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{staffAccessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/staff/me/bookings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "staff",
+                "me",
+                "bookings"
+              ]
+            },
+            "description": "Confirmed bookings in rooms this sitter runs that still need a check-in or check-out."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get My Trips (Driver)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{driverAccessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/staff/me/trips",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "staff",
+                "me",
+                "trips"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get My Earnings",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{staffAccessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/staff/me/earnings?from=2026-01-01&to=2026-12-31",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "staff",
+                "me",
+                "earnings"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "2026-01-01",
+                  "disabled": true
+                },
+                {
+                  "key": "to",
+                  "value": "2026-12-31",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "description": "Requires a Staff account to already exist — create one via 5. Admin > Staff Management first, then log in here."
+    },
+    {
+      "name": "6. Room",
+      "item": [
+        {
+          "name": "List Rooms - No Token (401)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/room",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "room"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 401', () => pm.response.to.have.status(401));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create Room",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminAccessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Postman Sunbeam Room\",\n  \"tier\": \"DAILY\",\n  \"capacity\": 1,\n  \"dayOfWeek\": \"{{todayDayOfWeek}}\",\n  \"startTime\": \"06:00\",\n  \"endTime\": \"08:00\",\n  \"staffId\": \"{{staffId}}\",\n  \"priceMultiplier\": 1.5\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/room",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "room"
+              ]
+            },
+            "description": "Capacity 1 on purpose, so the very next booking already fills it — makes the waitlist demo in folder 8 trivial to trigger. Scheduled for today's weekday."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  if (!pm.collectionVariables.get('todayDayOfWeek')) {",
+                  "    const days = ['SUNDAY','MONDAY','TUESDAY','WEDNESDAY','THURSDAY','FRIDAY','SATURDAY'];",
+                  "    const now = new Date();",
+                  "    pm.collectionVariables.set('todayDayOfWeek', days[now.getUTCDay()]);",
+                  "    pm.collectionVariables.set('todaySessionDate', now.toISOString().slice(0, 10));",
+                  "  }",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 201', () => pm.response.to.have.status(201));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "  pm.collectionVariables.set('roomId', pm.response.json().data.id);",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create Room 2 (for waitlist promotion demo)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminAccessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Postman Rainbow Room\",\n  \"tier\": \"DAILY\",\n  \"capacity\": 1,\n  \"dayOfWeek\": \"{{todayDayOfWeek}}\",\n  \"startTime\": \"09:00\",\n  \"endTime\": \"11:00\",\n  \"staffId\": \"{{staffId}}\",\n  \"priceMultiplier\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/room",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "room"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 201', () => pm.response.to.have.status(201));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "  pm.collectionVariables.set('room2Id', pm.response.json().data.id);",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create Room - Overlapping Staff Schedule (409)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminAccessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Clash Room\",\n  \"tier\": \"DAILY\",\n  \"capacity\": 1,\n  \"dayOfWeek\": \"{{todayDayOfWeek}}\",\n  \"startTime\": \"06:30\",\n  \"endTime\": \"07:30\",\n  \"staffId\": \"{{staffId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/room",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "room"
+              ]
+            },
+            "description": "This staff member already runs Postman Sunbeam Room at an overlapping time."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 409', () => pm.response.to.have.status(409));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create Room - As Guardian (403)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{guardianAccessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"X\",\n  \"tier\": \"DAILY\",\n  \"capacity\": 1,\n  \"dayOfWeek\": \"MONDAY\",\n  \"startTime\": \"01:00\",\n  \"endTime\": \"02:00\",\n  \"staffId\": \"{{staffId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/room",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "room"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 403', () => pm.response.to.have.status(403));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List Rooms",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{guardianAccessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/room?page=1&limit=10&tier=DAILY&status=AVAILABLE&sortBy=seatsLeft&sortOrder=asc",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "room"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1",
+                  "disabled": false
+                },
+                {
+                  "key": "limit",
+                  "value": "10",
+                  "disabled": false
+                },
+                {
+                  "key": "tier",
+                  "value": "DAILY",
+                  "disabled": true
+                },
+                {
+                  "key": "status",
+                  "value": "AVAILABLE",
+                  "disabled": true
+                },
+                {
+                  "key": "sortBy",
+                  "value": "seatsLeft",
+                  "disabled": true
+                },
+                {
+                  "key": "sortOrder",
+                  "value": "asc",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Supports pagination, filtering by tier/status/dayOfWeek/date, and sorting."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Search Rooms",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{guardianAccessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/room/search?q=Postman",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "room",
+                "search"
+              ],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "Postman",
+                  "disabled": false
+                }
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get Room by Id",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{guardianAccessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/room/{{roomId}}?date={{todaySessionDate}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "room",
+                "{{roomId}}"
+              ],
+              "query": [
+                {
+                  "key": "date",
+                  "value": "{{todaySessionDate}}",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Returns `seatsLeft` for the room's next upcoming session, or for `?date=` if given."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Update Room",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminAccessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"priceMultiplier\": 1.25\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/room/{{roomId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "room",
+                "{{roomId}}"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "description": "Admin manages Rooms; any logged-in user (any role) can browse/search them. `seatsLeft` is cached in Redis and invalidated on every booking/cancellation/promotion. \"Delete Room\" moved to 14. Cleanup — folders 7-8 still need Room 2 to exist for the waitlist promotion demo."
+    },
+    {
+      "name": "7. Booking",
+      "item": [
+        {
+          "name": "Create Booking (fills Room 1, capacity 1)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{guardianAccessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"childId\": \"{{childId}}\",\n  \"roomId\": \"{{roomId}}\",\n  \"sessionDate\": \"{{todaySessionDate}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/booking",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "booking"
+              ]
+            },
+            "description": "Validated against seats remaining, wallet balance >= estimated fee, and no overlapping booking for this child. Returns 201 CONFIRMED here since the room is empty; a full room returns 202 with a waitlist entry instead (see next request)."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  if (!pm.collectionVariables.get('todayDayOfWeek')) {",
+                  "    const days = ['SUNDAY','MONDAY','TUESDAY','WEDNESDAY','THURSDAY','FRIDAY','SATURDAY'];",
+                  "    const now = new Date();",
+                  "    pm.collectionVariables.set('todayDayOfWeek', days[now.getUTCDay()]);",
+                  "    pm.collectionVariables.set('todaySessionDate', now.toISOString().slice(0, 10));",
+                  "  }",
+                  "})();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 201', () => pm.response.to.have.status(201));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "  pm.test('Status is CONFIRMED', () => pm.expect(pm.response.json().data.status).to.eql('CONFIRMED'));",
+                  "  pm.collectionVariables.set('bookingId', pm.response.json().data.id);",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create Booking - Double-Book Same Slot (409)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{guardianAccessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"childId\": \"{{childId}}\",\n  \"roomId\": \"{{roomId}}\",\n  \"sessionDate\": \"{{todaySessionDate}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/booking",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "booking"
+              ]
+            },
+            "description": "Same child, same room, same date — 100% overlap with the booking above."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 409', () => pm.response.to.have.status(409));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create Booking - Room 2 (for waitlist promotion demo)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{guardianAccessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"childId\": \"{{childId}}\",\n  \"roomId\": \"{{room2Id}}\",\n  \"sessionDate\": \"{{todaySessionDate}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/booking",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "booking"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 201', () => pm.response.to.have.status(201));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "  pm.collectionVariables.set('booking2Id', pm.response.json().data.id);",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create Booking - Room 2 Full -> Waitlisted (202)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{guardian2AccessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"childId\": \"{{guardian2ChildId}}\",\n  \"roomId\": \"{{room2Id}}\",\n  \"sessionDate\": \"{{todaySessionDate}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/booking",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "booking"
+              ]
+            },
+            "description": "Room 2 (capacity 1) is already full from the request above, so guardian2 is queued instead of rejected — the core waitlist-priority differentiator (see 8. Waitlist)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 202', () => pm.response.to.have.status(202));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "  pm.test('Status is PENDING (waitlisted)', () => pm.expect(pm.response.json().data.status).to.eql('PENDING'));",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List My Bookings",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{guardianAccessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/booking?page=1&limit=10&status=CONFIRMED",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "booking"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1",
+                  "disabled": false
+                },
+                {
+                  "key": "limit",
+                  "value": "10",
+                  "disabled": false
+                },
+                {
+                  "key": "status",
+                  "value": "CONFIRMED",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get Booking by Id",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{guardianAccessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/booking/{{bookingId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "booking",
+                "{{bookingId}}"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get Booking - Another Guardian's (404)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{guardian2AccessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/booking/{{bookingId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "booking",
+                "{{bookingId}}"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 404', () => pm.response.to.have.status(404));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Check-In - As Guardian (403)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{guardianAccessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/booking/{{bookingId}}/check-in",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "booking",
+                "{{bookingId}}",
+                "check-in"
+              ]
+            },
+            "description": "Only the sitter running the room may log a check-in."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 403', () => pm.response.to.have.status(403));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Check-In",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{staffAccessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/booking/{{bookingId}}/check-in",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "booking",
+                "{{bookingId}}",
+                "check-in"
+              ]
+            },
+            "description": "Only possible on the session date, once per booking."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 201', () => pm.response.to.have.status(201));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Check-In Again (409)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{staffAccessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/booking/{{bookingId}}/check-in",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "booking",
+                "{{bookingId}}",
+                "check-in"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 409', () => pm.response.to.have.status(409));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Check-Out",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{staffAccessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/booking/{{bookingId}}/check-out",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "booking",
+                "{{bookingId}}",
+                "check-out"
+              ]
+            },
+            "description": "hoursUsed x hourlyRate x priceMultiplier is deducted from the wallet atomically. If the wallet cannot cover it the booking is flagged `insufficientBalance` instead of blocking the child being released."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "  pm.test('Status is COMPLETED', () => pm.expect(pm.response.json().data.booking.status).to.eql('COMPLETED'));",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Cancel a COMPLETED Booking (409)",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{guardianAccessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/booking/{{bookingId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "booking",
+                "{{bookingId}}"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 409', () => pm.response.to.have.status(409));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Cancel Booking (triggers waitlist promotion)",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{guardianAccessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/booking/{{booking2Id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "booking",
+                "{{booking2Id}}"
+              ]
+            },
+            "description": "Cancelling this still-CONFIRMED Room 2 booking frees its one seat and re-ranks Room 2's waitlist inside the same transaction — guardian2's queued child should be auto-promoted. Re-run '8. Waitlist > Get Room Waitlist' after this to see it empty out, and 'List My Bookings' as guardian2 to see the new CONFIRMED booking."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "  pm.test('Status is CANCELLED', () => pm.expect(pm.response.json().data.status).to.eql('CANCELLED'));",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "description": "Guardian applies for a seat; a full room auto-waitlists instead of failing. Check-in/check-out is staff-only and triggers fare calculation + wallet deduction on checkout."
+    },
+    {
+      "name": "8. Waitlist",
+      "item": [
+        {
+          "name": "Get Room Waitlist",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{staffAccessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/room/{{room2Id}}/waitlist",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "room",
+                "{{room2Id}}",
+                "waitlist"
+              ]
+            },
+            "description": "Ranked by priorityScore = 0.5 x waitTimeHours + 0.3 x tierWeight - 0.4 x cancellationPenalty. Run before and after '7. Booking > Cancel Booking (triggers waitlist promotion)' to see an entry disappear on promotion. Staff running the room, or any Admin, can view it."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get Room Waitlist - As Guardian (403)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{guardianAccessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/room/{{room2Id}}/waitlist",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "room",
+                "{{room2Id}}",
+                "waitlist"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 403', () => pm.response.to.have.status(403));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List Guardian 2's Bookings (find the promoted one)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{guardian2AccessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/booking?status=CONFIRMED",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "booking"
+              ],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "CONFIRMED",
+                  "disabled": false
+                }
+              ]
+            },
+            "description": "Finds the booking guardian2 was just auto-promoted into and captures it as `promotedBookingId`, used by 9. Transport below."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "  const promoted = pm.response.json().data.find((b) => b.room.id === pm.collectionVariables.get('room2Id'));",
+                  "  pm.test('Guardian 2 was promoted into Room 2', () => pm.expect(promoted).to.not.be.undefined);",
+                  "  if (promoted) pm.collectionVariables.set('promotedBookingId', promoted.id);",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "description": "Mounted under /room, so this is GET /room/:id/waitlist. Re-ranks on every cancellation — see the Booking folder's cancel request for the promotion trigger."
+    },
+    {
+      "name": "9. Transport",
+      "item": [
+        {
+          "name": "Create Vehicle - As Guardian (403)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{guardianAccessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"plateNumber\": \"BAD-1\",\n  \"capacity\": 4,\n  \"vehicleType\": \"CAR\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/transport/vehicles",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "transport",
+                "vehicles"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 403', () => pm.response.to.have.status(403));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create Vehicle",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{driverAccessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"plateNumber\": \"PMN-{{$timestamp}}\",\n  \"capacity\": 4,\n  \"vehicleType\": \"CAR\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/transport/vehicles",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "transport",
+                "vehicles"
+              ]
+            },
+            "description": "DRIVER or BOTH staff type only."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 201', () => pm.response.to.have.status(201));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "  pm.collectionVariables.set('vehicleId', pm.response.json().data.id);",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List My Vehicles",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{driverAccessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/transport/vehicles/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "transport",
+                "vehicles",
+                "me"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List Bookable Vehicles",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{guardianAccessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/transport/vehicles?vehicleType=CAR",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "transport",
+                "vehicles"
+              ],
+              "query": [
+                {
+                  "key": "vehicleType",
+                  "value": "CAR",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Any logged-in user — a guardian picks a vehicle from here when requesting a ride."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Update Vehicle",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{driverAccessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"capacity\": 5\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/transport/vehicles/{{vehicleId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "transport",
+                "vehicles",
+                "{{vehicleId}}"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create Transport Booking",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{guardian2AccessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"bookingId\": \"{{promotedBookingId}}\",\n  \"vehicleId\": \"{{vehicleId}}\",\n  \"pickupAddress\": \"123 Pickup Lane, Dhaka\",\n  \"dropoffAddress\": \"456 Dropoff Ave, Dhaka\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/transport",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "transport"
+              ]
+            },
+            "description": "Ties a ride to an existing, active care booking. Uses `promotedBookingId`, captured in 8. Waitlist — that booking belongs to guardian2, so this (and every other guardian-facing request in this folder) authenticates as guardian2, not guardian1."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 201', () => pm.response.to.have.status(201));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "  pm.collectionVariables.set('transportId', pm.response.json().data.id);",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List My Transport Bookings",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{guardian2AccessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/transport?page=1&limit=10",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "transport"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1",
+                  "disabled": false
+                },
+                {
+                  "key": "limit",
+                  "value": "10",
+                  "disabled": false
+                }
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get Transport Booking by Id",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{guardian2AccessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/transport/{{transportId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "transport",
+                "{{transportId}}"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Start Trip - As Guardian (403)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{guardian2AccessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/transport/{{transportId}}/start",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "transport",
+                "{{transportId}}",
+                "start"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 403', () => pm.response.to.have.status(403));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Start Trip",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{driverAccessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/transport/{{transportId}}/start",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "transport",
+                "{{transportId}}",
+                "start"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "  pm.test('Status is IN_PROGRESS', () => pm.expect(pm.response.json().data.status).to.eql('IN_PROGRESS'));",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "End Trip",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{driverAccessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/transport/{{transportId}}/end",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "transport",
+                "{{transportId}}",
+                "end"
+              ]
+            },
+            "description": "fare = baseFare + durationMinutes x perMinuteRate, deducted from the wallet the same way as care fees."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "  pm.test('Status is COMPLETED', () => pm.expect(pm.response.json().data.status).to.eql('COMPLETED'));",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Cancel a COMPLETED Transport Booking (409)",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{guardian2AccessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/transport/{{transportId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "transport",
+                "{{transportId}}"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 409', () => pm.response.to.have.status(409));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Delete Vehicle",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{driverAccessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/transport/vehicles/{{vehicleId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "transport",
+                "vehicles",
+                "{{vehicleId}}"
+              ]
+            },
+            "description": "Refused (409) while the vehicle has ride history — run against a fresh vehicle with no completed trips to see this succeed."
+          },
+          "event": []
+        }
+      ],
+      "description": "DRIVER/BOTH staff register vehicles; a guardian books a ride tied to an existing care booking. Trip start/end triggers fare deduction the same way check-out does for care fees."
+    },
+    {
+      "name": "10. Rating",
+      "item": [
+        {
+          "name": "Create Rating - Sitter",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{guardianAccessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"bookingId\": \"{{bookingId}}\",\n  \"staffId\": \"{{staffId}}\",\n  \"score\": 5,\n  \"comment\": \"Wonderful care, highly recommend!\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/rating",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "rating"
+              ]
+            },
+            "description": "Only ratable once the booking is COMPLETED and the staffId matches who actually ran the session/trip on it."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 201', () => pm.response.to.have.status(201));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create Rating - Duplicate (409)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{guardianAccessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"bookingId\": \"{{bookingId}}\",\n  \"staffId\": \"{{staffId}}\",\n  \"score\": 4\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/rating",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "rating"
+              ]
+            },
+            "description": "One rating per staff member per booking."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 409', () => pm.response.to.have.status(409));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create Rating - Not Ratable Yet (409)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{guardianAccessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"bookingId\": \"{{booking2Id}}\",\n  \"staffId\": \"{{staffId}}\",\n  \"score\": 3\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/rating",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "rating"
+              ]
+            },
+            "description": "This booking was cancelled, never completed."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 409', () => pm.response.to.have.status(409));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get Staff Ratings",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{guardianAccessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/staff/{{staffId}}/ratings?page=1&limit=10",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "staff",
+                "{{staffId}}",
+                "ratings"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1",
+                  "disabled": false
+                },
+                {
+                  "key": "limit",
+                  "value": "10",
+                  "disabled": false
+                }
+              ]
+            },
+            "description": "Average score (AVG + GROUP BY) plus recent reviews. Public to any logged-in user."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "description": "A Guardian rates the sitter and/or driver who actually served a COMPLETED booking, 1-5 with an optional comment."
+    },
+    {
+      "name": "11. Wallet",
+      "item": [
+        {
+          "name": "List My Wallet Transactions",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{guardianAccessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/wallet/transactions?page=1&limit=10&type=CARE_FEE",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "wallet",
+                "transactions"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1",
+                  "disabled": false
+                },
+                {
+                  "key": "limit",
+                  "value": "10",
+                  "disabled": false
+                },
+                {
+                  "key": "type",
+                  "value": "CARE_FEE",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "The guardian's own ledger, newest first. Shows the TOPUP from a completed bKash payment and the CARE_FEE/TRANSPORT_FARE debits from check-out / trip-end above. Empty until at least one real bKash top-up has completed — see 12. Payment."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "description": "Append-only ledger. Balance is never written directly — every row here corresponds 1:1 with a balance change made in the same DB transaction."
+    },
+    {
+      "name": "12. Payment (bKash)",
+      "item": [
+        {
+          "name": "Initiate Wallet Top-Up (manual - real bKash sandbox)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{guardianAccessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 500\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/payment/top-up",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "payment",
+                "top-up"
+              ]
+            },
+            "description": "⚠️ Calls the real bKash sandbox Grant Token + Create Payment APIs and returns a `checkoutUrl`. Open that URL in a browser, log in with the bKash sandbox test MSISDN/OTP, and complete or cancel the payment to continue the flow below. Requires BKASH_* env vars to be configured."
+          },
+          "event": []
+        },
+        {
+          "name": "bKash Callback (manual - browser redirect only)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/payment/bkash/callback?paymentID=<from the bKash redirect>&status=success",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "payment",
+                "bkash",
+                "callback"
+              ],
+              "query": [
+                {
+                  "key": "paymentID",
+                  "value": "<from the bKash redirect>",
+                  "disabled": false
+                },
+                {
+                  "key": "status",
+                  "value": "success",
+                  "disabled": false
+                }
+              ]
+            },
+            "description": "⚠️ Public endpoint bKash itself redirects the guardian to after checkout — not meant to be called directly from Postman. The `status` query param is only a hint; the backend always re-confirms via its own Execute/Query Payment call before crediting the wallet, so a forged callback here cannot fabricate a credit."
+          },
+          "event": []
+        },
+        {
+          "name": "Get My Payment by Id",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{guardianAccessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/payment/{{paymentId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "payment",
+                "{{paymentId}}"
+              ]
+            },
+            "description": "Poll a top-up attempt's status by id (from the Initiate response). Guardian polls their own payment; someone else's gets a 404, same as a missing one."
+          },
+          "event": []
+        },
+        {
+          "name": "Get Payment - Not Found (404)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{guardianAccessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/payment/00000000-0000-0000-0000-000000000000",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "payment",
+                "00000000-0000-0000-0000-000000000000"
+              ]
+            },
+            "description": "This one IS safe to run automatically — no real bKash call involved."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 404', () => pm.response.to.have.status(404));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "description": "Real bKash Tokenized Checkout integration — sandbox by default. The Initiate and Callback requests are documented here but need a live browser session against the bKash sandbox to actually complete; run those two manually. Every other request in this folder is safe to automate."
+    },
+    {
+      "name": "13. Admin - Operations",
+      "item": [
+        {
+          "name": "Get Dashboard Stats",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminAccessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/dashboard-stats",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "dashboard-stats"
+              ]
+            },
+            "description": "Total revenue, active bookings, room occupancy rate, top-rated staff, waitlist conversion rate."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get Audit Logs",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminAccessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/audit-logs?page=1&limit=20&entity=Booking",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "audit-logs"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1",
+                  "disabled": false
+                },
+                {
+                  "key": "limit",
+                  "value": "20",
+                  "disabled": false
+                },
+                {
+                  "key": "entity",
+                  "value": "Booking",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Actor, action, entity, entityId, metadata, timestamp for every audit-worthy event across the platform."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List Users",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminAccessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/users?page=1&limit=10&role=GUARDIAN",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "users"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1",
+                  "disabled": false
+                },
+                {
+                  "key": "limit",
+                  "value": "10",
+                  "disabled": false
+                },
+                {
+                  "key": "role",
+                  "value": "GUARDIAN",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Update User Role - On Self (409)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminAccessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"role\": \"STAFF\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/admin/users/{{adminUserId}}/role",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "users",
+                "{{adminUserId}}",
+                "role"
+              ]
+            },
+            "description": "An Admin can never change their own role through this endpoint."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 409', () => pm.response.to.have.status(409));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Update User Role - No Destination Profile (409)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminAccessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"role\": \"STAFF\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/admin/users/{{guardianUserId}}/role",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "users",
+                "{{guardianUserId}}",
+                "role"
+              ]
+            },
+            "description": "Corrective role changes only: the destination profile (here, a StaffProfile) must already exist for that user. A plain Guardian never has one, so this always 409s — by design, no endpoint ever gives one user both profile types."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 409', () => pm.response.to.have.status(409));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Update User Role - Not Found (404)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminAccessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"role\": \"STAFF\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/admin/users/00000000-0000-0000-0000-000000000000/role",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "users",
+                "00000000-0000-0000-0000-000000000000",
+                "role"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 404', () => pm.response.to.have.status(404));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "description": "Platform-wide analytics, audit trail, and user management. ADMIN role changes are never allowed in either direction — Admins only ever come from `npx prisma db seed`."
+    },
+    {
+      "name": "14. Cleanup (optional, run last)",
+      "item": [
+        {
+          "name": "Cancel Guardian 2's Room 2 Booking",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{guardian2AccessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/booking/{{promotedBookingId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "booking",
+                "{{promotedBookingId}}"
+              ]
+            },
+            "description": "Room 2's seat is still held by guardian2's promoted booking from 8. Waitlist — 9. Transport only booked a ride around it, it never checked that booking in or out. Deleting Room 2 below is refused while any active booking remains, so this clears it first."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Delete Room 2",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminAccessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/room/{{room2Id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "room",
+                "{{room2Id}}"
+              ]
+            },
+            "description": "⚠️ Soft delete. Refused while children hold upcoming seats or wait in its queue — clear by this point since the request above just cancelled Room 2's one remaining booking."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Delete My Account (Guardian)",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{guardianAccessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/guardian/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "guardian",
+                "me"
+              ]
+            },
+            "description": "⚠️ Soft-deletes the Guardian used throughout this collection and immediately invalidates their access token. Deliberately the very last request in the collection — every other folder needs this Guardian logged in."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "(function () {",
+                  "  pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "  pm.test('Has success envelope', () => { const b = pm.response.json(); pm.expect(b).to.have.property('success'); });",
+                  "})();"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "description": "Destructive demos, deliberately isolated at the end so a normal top-to-bottom Collection Runner pass exercises every module first. Do not move these earlier — 2. Guardian and 6. Room intentionally do NOT delete their own demo records."
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:5000/api/v1",
+      "type": "string"
+    },
+    {
+      "key": "guardianEmail",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "guardianPassword",
+      "value": "Passw0rd!123",
+      "type": "string"
+    },
+    {
+      "key": "guardian2Email",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "guardian2Password",
+      "value": "Passw0rd!123",
+      "type": "string"
+    },
+    {
+      "key": "adminEmail",
+      "value": "admin@carenest.com",
+      "type": "string"
+    },
+    {
+      "key": "adminPassword",
+      "value": "CareNest@Admin2026",
+      "type": "string"
+    },
+    {
+      "key": "staffEmail",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "staffPassword",
+      "value": "Passw0rd!123",
+      "type": "string"
+    },
+    {
+      "key": "driverEmail",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "driverPassword",
+      "value": "Passw0rd!123",
+      "type": "string"
+    },
+    {
+      "key": "guardianAccessToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "guardianRefreshToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "guardian2AccessToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "adminAccessToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "adminUserId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "staffAccessToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "driverAccessToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "guardianUserId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "guardianId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "childId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "child2Id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "guardian2ChildId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "staffId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "driverId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "disposableStaffId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "roomId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "room2Id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "bookingId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "booking2Id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "promotedBookingId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "vehicleId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "transportId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "availabilitySlotId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "paymentId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "todayDayOfWeek",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "todaySessionDate",
+      "value": "",
+      "type": "string"
+    }
+  ]
+}
