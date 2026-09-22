@@ -10,6 +10,7 @@ import { BookingRoutes } from './app/module/booking/booking.route'
 import { ChildRoutes } from './app/module/child/child.route'
 import { GuardianRoutes } from './app/module/guardian/guardian.route'
 import { PaymentRoutes } from './app/module/payment/payment.route'
+import { RatingRoutes, StaffRatingRoutes } from './app/module/rating/rating.route'
 import { RoomRoutes } from './app/module/room/room.route'
 import { StaffRoutes } from './app/module/staff/staff.route'
 import { TransportRoutes } from './app/module/transport/transport.route'
@@ -50,6 +51,8 @@ app.use('/api/v1/payment', PaymentRoutes)
 app.use('/api/v1/wallet', WalletRoutes)
 app.use('/api/v1/transport', TransportRoutes)
 app.use('/api/v1/staff', StaffRoutes)
+app.use('/api/v1/staff', StaffRatingRoutes)
+app.use('/api/v1/rating', RatingRoutes)
 app.use('/api/v1/admin', AdminRoutes)
 
 app.use(notFound)
