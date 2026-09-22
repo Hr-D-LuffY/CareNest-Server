@@ -9,6 +9,7 @@ import {
 } from '../../../generated/prisma/enums'
 import { AppError } from '../../errorHelpers/AppError'
 import { prisma } from '../../lib/prisma'
+import { redisDel, redisGet, redisSet } from '../../lib/redis'
 import { toIsoDate } from '../../utils/date'
 import type { TokenPayload } from '../../utils/jwt'
 import { buildMeta, getPagination } from '../../utils/pagination'
@@ -191,10 +192,37 @@ type SeatedRoom = Pick<RoomRecord, 'id' | 'capacity' | 'dayOfWeek'>
 
 const seatKey = (roomId: string, sessionDate: Date) => `${roomId}|${sessionDate.getTime()}`
 
-// THE one place seatsLeft is computed (booking validation and waitlist promotion reuse it): seats
-// taken are the CONFIRMED bookings for that room on that session date. One grouped query serves
-// any number of rooms. Without `date`, each room is checked for its next upcoming session. Pass a
-// transaction client to count inside a transaction.
+// Only bookedSeats is cached, never the full seatsLeft: capacity is read fresh from the room row
+// every time, so a capacity change can never be masked by a stale cache entry.
+const SEATS_CACHE_TTL_SECONDS = 300
+const seatsCacheKey = (roomId: string, sessionDate: Date) =>
+  `seats:${roomId}:${sessionDate.getTime()}`
+
+export const invalidateSeatsCache = (roomId: string, sessionDate: Date) =>
+  redisDel(seatsCacheKey(roomId, sessionDate))
+
+const queryBookedSeats = async (
+  client: Prisma.TransactionClient,
+  rooms: SeatedRoom[],
+  dates: Date[],
+) => {
+  const booked =
+    rooms.length === 0
+      ? []
+      : await client.booking.groupBy({
+          by: ['roomId', 'sessionDate'],
+          where: {
+            roomId: { in: rooms.map((room) => room.id) },
+            sessionDate: { in: dates },
+            status: BookingStatus.CONFIRMED,
+          },
+          _count: { _all: true },
+        })
+  return new Map(
+    booked.map((group) => [seatKey(group.roomId, group.sessionDate), group._count._all]),
+  )
+}
+
 export const attachSeatsLeft = async <T extends SeatedRoom>(
   rooms: T[],
   date?: Date,
@@ -208,21 +236,34 @@ export const attachSeatsLeft = async <T extends SeatedRoom>(
     ...new Map(sessions.map(({ sessionDate }) => [sessionDate.getTime(), sessionDate])).values(),
   ]
 
-  const booked =
-    rooms.length === 0
-      ? []
-      : await client.booking.groupBy({
-          by: ['roomId', 'sessionDate'],
-          where: {
-            roomId: { in: rooms.map((room) => room.id) },
-            sessionDate: { in: dates },
-            status: BookingStatus.CONFIRMED,
-          },
-          _count: { _all: true },
-        })
-  const bookedByRoomDate = new Map(
-    booked.map((group) => [seatKey(group.roomId, group.sessionDate), group._count._all]),
-  )
+  const cacheable = rooms.length > 0 && client === prisma
+  const cached: (string | null)[] = cacheable
+    ? await Promise.all(
+        sessions.map(({ room, sessionDate }) => redisGet(seatsCacheKey(room.id, sessionDate))),
+      )
+    : []
+  const allCached = cacheable && cached.every((value) => value !== null)
+
+  const bookedByRoomDate = allCached
+    ? new Map(
+        sessions.map(({ room, sessionDate }, index) => [
+          seatKey(room.id, sessionDate),
+          Number(cached[index]),
+        ]),
+      )
+    : await queryBookedSeats(client, rooms, dates)
+
+  if (cacheable && !allCached) {
+    await Promise.all(
+      sessions.map(({ room, sessionDate }) =>
+        redisSet(
+          seatsCacheKey(room.id, sessionDate),
+          String(bookedByRoomDate.get(seatKey(room.id, sessionDate)) ?? 0),
+          SEATS_CACHE_TTL_SECONDS,
+        ),
+      ),
+    )
+  }
 
   return sessions.map(({ room, sessionDate }) => {
     const bookedSeats = bookedByRoomDate.get(seatKey(room.id, sessionDate)) ?? 0

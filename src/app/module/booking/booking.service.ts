@@ -15,6 +15,7 @@ import type { TokenPayload } from '../../utils/jwt'
 import { CHILD_NOT_FOUND_MESSAGE, getGuardianId } from '../child/child.service'
 import {
   attachSeatsLeft,
+  invalidateSeatsCache,
   ROOM_NOT_FOUND_MESSAGE,
   todayUtc,
   toSessionDate,
@@ -92,7 +93,7 @@ const createBooking = async (caller: Caller, payload: CreateBookingPayload) => {
 
   // A full room queues the child instead of failing (SRS 4.6), so exactly one of `booking` and
   // `waitlistEntry` comes back.
-  return prisma.$transaction(async (tx) => {
+  const result = await prisma.$transaction(async (tx) => {
     await lockRow(tx, 'children', childId)
     await lockRow(tx, 'rooms', roomId)
 
@@ -143,12 +144,11 @@ const createBooking = async (caller: Caller, payload: CreateBookingPayload) => {
     })
     return { booking: toBookingView(created), waitlistEntry: null }
   })
+
+  if (result.booking) await invalidateSeatsCache(roomId, sessionDate)
+  return result
 }
 
-// Cancelling releases the seat (seatsLeft only counts CONFIRMED bookings), stamps `cancelledAt`,
-// which feeds the waitlist cancellation penalty, and then hands the freed seat to the top-ranked
-// waitlist entry, all in one transaction (SRS 4.7). The status flip is a conditional update, so a
-// double-click or a concurrent check-in can't cancel the same booking twice.
 const cancelBooking = async (caller: Caller, bookingId: string) => {
   const guardianId = await getGuardianId(caller)
 
@@ -198,6 +198,8 @@ const cancelBooking = async (caller: Caller, bookingId: string) => {
 
     return tx.booking.findUniqueOrThrow({ where: { id: bookingId }, select: bookingSelect })
   })
+
+  await invalidateSeatsCache(booking.roomId, booking.sessionDate)
   return toBookingView(cancelled)
 }
 
