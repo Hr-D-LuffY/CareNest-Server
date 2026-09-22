@@ -3,7 +3,7 @@ import { catchAsync } from '../../utils/catchAsync'
 import { getAuthUser } from '../../utils/getAuthUser'
 import { sendResponse } from '../../utils/sendResponse'
 import { idParamSchema } from '../../utils/validation'
-import { createBookingSchema } from './booking.interface'
+import { createBookingSchema, listBookingsQuerySchema } from './booking.interface'
 import { BookingService } from './booking.service'
 
 const createBooking = catchAsync(async (req, res) => {
@@ -22,6 +22,31 @@ const createBooking = catchAsync(async (req, res) => {
   sendResponse(res, {
     statusCode: httpStatus.CREATED,
     message: 'Booking confirmed successfully',
+    data: booking,
+  })
+})
+
+const listMyBookings = catchAsync(async (req, res) => {
+  const query = listBookingsQuerySchema.parse(req.query)
+  const { items, meta } = await BookingService.listMyBookings(getAuthUser(req), query)
+
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    message: 'Bookings retrieved successfully',
+    data: items,
+    meta,
+  })
+})
+
+const getMyBooking = catchAsync(async (req, res) => {
+  const booking = await BookingService.getMyBooking(
+    getAuthUser(req),
+    idParamSchema.parse(req.params).id,
+  )
+
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    message: 'Booking retrieved successfully',
     data: booking,
   })
 })
@@ -59,4 +84,11 @@ const checkOut = catchAsync(async (req, res) => {
   })
 })
 
-export const BookingController = { createBooking, cancelBooking, checkIn, checkOut }
+export const BookingController = {
+  createBooking,
+  listMyBookings,
+  getMyBooking,
+  cancelBooking,
+  checkIn,
+  checkOut,
+}

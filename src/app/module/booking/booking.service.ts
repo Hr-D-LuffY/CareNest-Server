@@ -12,6 +12,7 @@ import { prisma } from '../../lib/prisma'
 import { debitWallet } from '../../lib/wallet.service'
 import { toIsoDate } from '../../utils/date'
 import type { TokenPayload } from '../../utils/jwt'
+import { buildMeta, getPagination } from '../../utils/pagination'
 import { CHILD_NOT_FOUND_MESSAGE, getGuardianId } from '../child/child.service'
 import {
   attachSeatsLeft,
@@ -23,7 +24,7 @@ import {
 } from '../room/room.service'
 import { getMySitterId } from '../staff/staff.service'
 import { joinWaitlist, promoteFromWaitlist } from '../waitlist/waitlist.service'
-import type { CreateBookingPayload } from './booking.interface'
+import type { CreateBookingPayload, ListBookingsQuery } from './booking.interface'
 
 type Caller = Pick<TokenPayload, 'userId'>
 
@@ -147,6 +148,36 @@ const createBooking = async (caller: Caller, payload: CreateBookingPayload) => {
 
   if (result.booking) await invalidateSeatsCache(roomId, sessionDate)
   return result
+}
+
+const listMyBookings = async (caller: Caller, query: ListBookingsQuery) => {
+  const guardianId = await getGuardianId(caller)
+  const where: Prisma.BookingWhereInput = {
+    guardianId,
+    ...(query.status && { status: query.status }),
+  }
+
+  const [items, total] = await Promise.all([
+    prisma.booking.findMany({
+      where,
+      select: bookingSelect,
+      orderBy: [{ sessionDate: 'desc' }, { id: 'desc' }],
+      ...getPagination(query),
+    }),
+    prisma.booking.count({ where }),
+  ])
+  return { items: items.map(toBookingView), meta: buildMeta(query, total) }
+}
+
+// Someone else's booking gets the same 404 as a missing one, so ids can't be probed.
+const getMyBooking = async (caller: Caller, bookingId: string) => {
+  const guardianId = await getGuardianId(caller)
+  const booking = await prisma.booking.findFirst({
+    where: { id: bookingId, guardianId },
+    select: bookingSelect,
+  })
+  if (!booking) throw new AppError(httpStatus.NOT_FOUND, BOOKING_NOT_FOUND_MESSAGE)
+  return toBookingView(booking)
 }
 
 const cancelBooking = async (caller: Caller, bookingId: string) => {
@@ -353,4 +384,11 @@ const checkOut = async (caller: Caller, bookingId: string) => {
   return toCheckinLogView(log)
 }
 
-export const BookingService = { createBooking, cancelBooking, checkIn, checkOut }
+export const BookingService = {
+  createBooking,
+  listMyBookings,
+  getMyBooking,
+  cancelBooking,
+  checkIn,
+  checkOut,
+}
