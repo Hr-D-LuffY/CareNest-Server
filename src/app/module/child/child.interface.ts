@@ -27,9 +27,15 @@ export const updateChildSchema = updateBodySchema(
   .partial()
   .refine(...atLeastOneField)
 
+export const CHILD_SORT_FIELDS = ['createdAt', 'dateOfBirth', 'name'] as const
+
 export const listChildrenQuerySchema = z.object({
   ...paginationQueryShape,
   tier: z.enum(Tier).optional(),
+  sortBy: z
+    .enum(CHILD_SORT_FIELDS, { error: `Sort by must be one of: ${CHILD_SORT_FIELDS.join(', ')}` })
+    .default('createdAt'),
+  sortOrder: z.enum(['asc', 'desc'], { error: 'Sort order must be asc or desc' }).default('desc'),
 })
 
 export type CreateChildPayload = z.infer<typeof createChildSchema>

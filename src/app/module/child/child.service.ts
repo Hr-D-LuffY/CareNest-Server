@@ -1,4 +1,5 @@
 import httpStatus from 'http-status'
+import { Prisma } from '../../../generated/prisma/client'
 import { BookingStatus, WaitlistStatus } from '../../../generated/prisma/enums'
 import { AppError } from '../../errorHelpers/AppError'
 import { deleteImage, uploadImageBuffer } from '../../lib/cloudinary'
@@ -73,19 +74,48 @@ const createChild = async (caller: Caller, payload: CreateChildPayload) => {
   })
 }
 
+// The database collation is C, so a plain `orderBy: { name }` puts every capital letter before
+// every lowercase one ("Zoya" < "aarav"). Prisma's orderBy has no `mode: 'insensitive'`, so the
+// name sort asks Postgres for the page's ids ordered by LOWER(name), then loads those rows.
+// Same filter, same tie-breakers, same skip/take as the Prisma path below.
+const findChildrenPageByName = async (
+  guardianId: string,
+  query: ListChildrenQuery,
+  { skip, take }: ReturnType<typeof getPagination>,
+) => {
+  const tierFilter = query.tier ? Prisma.sql`AND "tier" = ${query.tier}::"Tier"` : Prisma.empty
+  const direction = query.sortOrder === 'asc' ? Prisma.sql`ASC` : Prisma.sql`DESC`
+
+  const rows = await prisma.$queryRaw<{ id: string }[]>`
+    SELECT "id" FROM "children"
+    WHERE "guardianId" = ${guardianId} AND "isDeleted" = false ${tierFilter}
+    ORDER BY LOWER("name") ${direction}, "name" ASC, "id" ASC
+    LIMIT ${take} OFFSET ${skip}`
+
+  const ids = rows.map(({ id }) => id)
+  const children = await prisma.child.findMany({ where: { id: { in: ids } }, select: childSelect })
+  const byId = new Map(children.map((child) => [child.id, child]))
+  return ids.flatMap((id) => byId.get(id) ?? [])
+}
+
+// `id` is always the last sort key so children sharing a date of birth or name keep a stable
+// position across pages.
 const listMyChildren = async (caller: Caller, query: ListChildrenQuery) => {
   const guardianId = await getGuardianId(caller)
   const where = { guardianId, isDeleted: false, ...(query.tier && { tier: query.tier }) }
+  const pagination = getPagination(query)
 
-  const [items, total] = await Promise.all([
-    prisma.child.findMany({
-      where,
-      select: childSelect,
-      orderBy: { createdAt: 'desc' },
-      ...getPagination(query),
-    }),
-    prisma.child.count({ where }),
-  ])
+  const findPage = () =>
+    query.sortBy === 'name'
+      ? findChildrenPageByName(guardianId, query, pagination)
+      : prisma.child.findMany({
+          where,
+          select: childSelect,
+          orderBy: [{ [query.sortBy]: query.sortOrder }, { id: 'asc' }],
+          ...pagination,
+        })
+
+  const [items, total] = await Promise.all([findPage(), prisma.child.count({ where })])
 
   return { items, meta: buildMeta(query, total) }
 }

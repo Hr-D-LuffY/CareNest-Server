@@ -3715,10 +3715,22 @@
 									"key": "limit",
 									"value": "10",
 									"disabled": false
+								},
+								{
+									"key": "sortBy",
+									"value": "dateOfBirth",
+									"description": "createdAt | dateOfBirth | name (default createdAt)",
+									"disabled": true
+								},
+								{
+									"key": "sortOrder",
+									"value": "desc",
+									"description": "asc | desc (default desc)",
+									"disabled": true
 								}
 							]
 						},
-						"description": ""
+						"description": "Guardian-only. Lists your own non-deleted children, paginated.\n\nQuery params:\n- page, limit — pagination (default 1 / 10, max limit 100)\n- tier — DAILY | WEEKLY | MONTHLY (optional filter)\n- sortBy — createdAt (default) | dateOfBirth | name. name sorts case-insensitively.\n- sortOrder — asc | desc (default desc)\n\nPresets: Recently added = createdAt desc (or no params); Youngest first = dateOfBirth desc; Oldest first = dateOfBirth asc; Name A to Z = name asc. Ties always fall back to id, so pages never repeat or skip a child. An invalid sortBy/sortOrder returns 400."
 					},
 					"event": [
 						{
@@ -3764,10 +3776,22 @@
 											"key": "limit",
 											"value": "10",
 											"disabled": false
+										},
+										{
+											"key": "sortBy",
+											"value": "dateOfBirth",
+											"description": "createdAt | dateOfBirth | name (default createdAt)",
+											"disabled": true
+										},
+										{
+											"key": "sortOrder",
+											"value": "desc",
+											"description": "asc | desc (default desc)",
+											"disabled": true
 										}
 									]
 								},
-								"description": ""
+								"description": "Guardian-only. Lists your own non-deleted children, paginated.\n\nQuery params:\n- page, limit — pagination (default 1 / 10, max limit 100)\n- tier — DAILY | WEEKLY | MONTHLY (optional filter)\n- sortBy — createdAt (default) | dateOfBirth | name. name sorts case-insensitively.\n- sortOrder — asc | desc (default desc)\n\nPresets: Recently added = createdAt desc (or no params); Youngest first = dateOfBirth desc; Oldest first = dateOfBirth asc; Name A to Z = name asc. Ties always fall back to id, so pages never repeat or skip a child. An invalid sortBy/sortOrder returns 400."
 							},
 							"status": "OK",
 							"code": 200,
@@ -3870,6 +3894,66 @@
 							"body": "{\"success\":true,\"message\":\"Children retrieved successfully\",\"data\":[{\"id\":\"0ca89f9c-f64f-474b-a790-4fc4af54f9f4\",\"name\":\"Kid Two\",\"dateOfBirth\":\"2021-06-01T00:00:00.000Z\",\"tier\":\"WEEKLY\",\"allergies\":null,\"conditions\":null,\"emergencyContactName\":\"Uncle\",\"emergencyContactPhone\":\"01722222222\",\"profilePhoto\":null,\"createdAt\":\"2026-09-22T15:12:37.608Z\",\"updatedAt\":\"2026-09-22T15:12:37.608Z\"},{\"id\":\"0ff3de07-0d23-4c0d-8db9-4ce9aa6654fa\",\"name\":\"Kid One\",\"dateOfBirth\":\"2020-03-15T00:00:00.000Z\",\"tier\":\"DAILY\",\"allergies\":\"peanuts\",\"conditions\":null,\"emergencyContactName\":\"Grandma\",\"emergencyContactPhone\":\"01711111111\",\"profilePhoto\":null,\"createdAt\":\"2026-09-22T15:12:37.252Z\",\"updatedAt\":\"2026-09-22T15:12:37.252Z\"}],\"meta\":{\"page\":1,\"limit\":10,\"total\":2}}"
 						}
 					]
+				},
+				{
+					"name": "List My Children - Sorted by Age",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{guardianAccessToken}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/child?page=1&limit=10&sortBy=dateOfBirth&sortOrder=desc",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"child"
+							],
+							"query": [
+								{
+									"key": "page",
+									"value": "1"
+								},
+								{
+									"key": "limit",
+									"value": "10"
+								},
+								{
+									"key": "sortBy",
+									"value": "dateOfBirth"
+								},
+								{
+									"key": "sortOrder",
+									"value": "desc"
+								}
+							]
+						},
+						"description": "Youngest first: sortBy=dateOfBirth&sortOrder=desc (latest birth date first). Use sortOrder=asc for oldest first."
+					},
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"(function () {",
+									"  pm.test(\"Status is 200\", () => pm.response.to.have.status(200));",
+									"  pm.test(\"Children come back with the youngest first (dateOfBirth descending)\", () => {",
+									"    const dates = pm.response.json().data.map((child) => new Date(child.dateOfBirth).getTime());",
+									"    pm.expect(dates.length).to.be.at.least(2);",
+									"    pm.expect(dates).to.eql([...dates].sort((a, b) => b - a));",
+									"  });",
+									"})();"
+								]
+							}
+						}
+					],
+					"response": []
 				},
 				{
 					"name": "List My Children - Filter by Tier",
