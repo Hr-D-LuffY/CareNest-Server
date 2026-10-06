@@ -143,7 +143,7 @@ All routes are versioned under `/api/v1` and require a `Authorization: Bearer <t
 | Child | `POST/GET/PATCH/DELETE /child`, `POST /child/:id/photo` |
 | Room | `POST/GET/PATCH/DELETE /room`, `GET /room/search` |
 | Booking | `POST /booking`, `GET /booking`, `DELETE /booking/:id`, `POST /booking/:id/check-in`, `POST /booking/:id/check-out` |
-| Waitlist | `GET /room/:id/waitlist` |
+| Waitlist | `GET /booking/waitlist` (guardian's own entries, `?page=&limit=&status=`), `GET /room/:id/waitlist` (staff/admin) |
 | Staff | `GET/PATCH /staff/me`, `POST /staff/availability`, `GET /staff/me/earnings` |
 | Transport | `POST /transport`, `POST /transport/vehicles`, `POST /transport/:id/start`, `POST /transport/:id/end` |
 | Rating | `POST /rating`, `GET /staff/:id/ratings` |

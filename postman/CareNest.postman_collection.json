@@ -14335,6 +14335,69 @@
 					]
 				},
 				{
+					"name": "List My Waitlist Entries (Guardian 2)",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{guardian2AccessToken}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/booking/waitlist?page=1&limit=10&status=PROMOTED",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"booking",
+								"waitlist"
+							],
+							"query": [
+								{
+									"key": "page",
+									"value": "1",
+									"disabled": false
+								},
+								{
+									"key": "limit",
+									"value": "10",
+									"disabled": false
+								},
+								{
+									"key": "status",
+									"value": "PROMOTED",
+									"description": "PENDING | PROMOTED | EXPIRED | CANCELLED. Omit for every status.",
+									"disabled": false
+								}
+							]
+						},
+						"description": "Guardian-only: the caller's own waitlist entries (each with priorityScore), newest first. Another guardian's entries never appear. Run before '7. Booking > Cancel Booking (triggers waitlist promotion)' with status=PENDING to see the queued child, and after it with status=PROMOTED to see the promotion."
+					},
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"(function () {",
+									"  pm.test('Status is 200', () => pm.response.to.have.status(200));",
+									"  const b = pm.response.json();",
+									"  pm.test('Has success envelope', () => pm.expect(b).to.have.property('success', true));",
+									"  pm.test('Entries carry priorityScore, room and child', () => b.data.forEach((e) => {",
+									"    pm.expect(e.priorityScore).to.be.a('number');",
+									"    pm.expect(e.room).to.have.property('id');",
+									"    pm.expect(e.child).to.have.property('tier');",
+									"  }));",
+									"})();"
+								]
+							}
+						}
+					],
+					"response": []
+				},
+				{
 					"name": "List Guardian 2's Bookings (find the promoted one)",
 					"request": {
 						"method": "GET",

@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { WaitlistStatus } from '../../../generated/prisma/enums'
 import { paginationQueryShape } from '../../utils/pagination'
 
 export const listRoomWaitlistQuerySchema = z.object({
@@ -8,3 +9,10 @@ export const listRoomWaitlistQuerySchema = z.object({
 })
 
 export type ListRoomWaitlistQuery = z.infer<typeof listRoomWaitlistQuerySchema>
+
+export const listMyWaitlistQuerySchema = z.object({
+  ...paginationQueryShape,
+  status: z.enum(WaitlistStatus).optional(),
+})
+
+export type ListMyWaitlistQuery = z.infer<typeof listMyWaitlistQuerySchema>

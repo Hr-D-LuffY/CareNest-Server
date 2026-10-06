@@ -8,8 +8,9 @@ import { prisma } from '../../lib/prisma'
 import { toIsoDate } from '../../utils/date'
 import type { TokenPayload } from '../../utils/jwt'
 import { buildMeta, getPagination } from '../../utils/pagination'
+import { getGuardianId } from '../child/child.service'
 import { attachSeatsLeft, ROOM_NOT_FOUND_MESSAGE, startOfUtcDay } from '../room/room.service'
-import type { ListRoomWaitlistQuery } from './waitlist.interface'
+import type { ListMyWaitlistQuery, ListRoomWaitlistQuery } from './waitlist.interface'
 
 type Caller = Pick<TokenPayload, 'userId' | 'role'>
 
@@ -315,4 +316,24 @@ const listRoomWaitlist = async (caller: Caller, roomId: string, query: ListRoomW
   return { items: items.map(toEntryView), meta: buildMeta(query, total) }
 }
 
-export const WaitlistService = { listRoomWaitlist }
+// A guardian's own entries across every room and status, newest first. Ownership is the where clause.
+const listMyWaitlist = async (caller: Caller, query: ListMyWaitlistQuery) => {
+  const guardianId = await getGuardianId(caller)
+  const where: Prisma.WaitlistEntryWhereInput = {
+    guardianId,
+    ...(query.status && { status: query.status }),
+  }
+  const [items, total] = await Promise.all([
+    prisma.waitlistEntry.findMany({
+      where,
+      select: waitlistEntrySelect,
+      orderBy: [{ joinedAt: 'desc' }, { id: 'desc' }],
+      ...getPagination(query),
+    }),
+    prisma.waitlistEntry.count({ where }),
+  ])
+
+  return { items: items.map(toEntryView), meta: buildMeta(query, total) }
+}
+
+export const WaitlistService = { listRoomWaitlist, listMyWaitlist }
