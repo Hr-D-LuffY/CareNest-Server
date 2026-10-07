@@ -81,6 +81,28 @@ const uploadMyVerificationDocument = async (caller: Caller, file: Express.Multer
   return updated
 }
 
+// The profile photo lives on the User row (the login), the same place as a guardian's, so every
+// screen that shows a name reads it from there. publicId isn't part of staffSelect (it's an internal
+// Cloudinary detail), so it's fetched separately, just for cleaning up the image it replaces.
+const uploadMyPhoto = async (caller: Caller, file: Express.Multer.File) => {
+  const current = await prisma.user.findFirst({
+    where: { id: caller.userId, isDeleted: false, staffProfile: { is: { isDeleted: false } } },
+    select: { profilePhotoPublicId: true },
+  })
+  if (!current) throw new AppError(httpStatus.NOT_FOUND, STAFF_NOT_FOUND_MESSAGE)
+
+  const { url, publicId } = await uploadImageBuffer(file.buffer, `carenest/users/${caller.userId}`)
+  const updated = await prisma.staffProfile.update({
+    where: { userId: caller.userId },
+    data: { user: { update: { profilePhoto: url, profilePhotoPublicId: publicId } } },
+    select: staffSelect,
+  })
+
+  // Only clean up the old image once the new one is safely saved.
+  if (current.profilePhotoPublicId) await deleteImage(current.profilePhotoPublicId)
+  return updated
+}
+
 const SLOT_NOT_FOUND_MESSAGE = 'Availability slot not found'
 
 const slotSelect = {
@@ -328,6 +350,7 @@ const getMyEarnings = async (caller: Caller, { from, to }: EarningsQuery) => {
 export const StaffService = {
   getMyProfile,
   updateMyProfile,
+  uploadMyPhoto,
   uploadMyVerificationDocument,
   listMyBookings,
   listMyTrips,

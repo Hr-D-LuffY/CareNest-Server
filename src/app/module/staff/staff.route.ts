@@ -9,6 +9,12 @@ const router = Router()
 router.get('/me', auth(Role.STAFF), StaffController.getMyProfile)
 router.patch('/me', auth(Role.STAFF), StaffController.updateMyProfile)
 router.post(
+  '/me/photo',
+  auth(Role.STAFF),
+  uploadImage.single('photo'),
+  StaffController.uploadMyPhoto,
+)
+router.post(
   '/me/verification-document',
   auth(Role.STAFF),
   uploadImage.single('document'),

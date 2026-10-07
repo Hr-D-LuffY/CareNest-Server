@@ -35,6 +35,17 @@ const updateMyProfile = catchAsync(async (req, res) => {
   })
 })
 
+const uploadMyPhoto = catchAsync(async (req, res) => {
+  if (!req.file) throw new AppError(httpStatus.BAD_REQUEST, 'A photo file is required')
+  const staff = await StaffService.uploadMyPhoto(getAuthUser(req), req.file)
+
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    message: 'Profile photo updated successfully',
+    data: staff,
+  })
+})
+
 const uploadMyVerificationDocument = catchAsync(async (req, res) => {
   if (!req.file) throw new AppError(httpStatus.BAD_REQUEST, 'A document file is required')
   const staff = await StaffService.uploadMyVerificationDocument(getAuthUser(req), req.file)
@@ -130,6 +141,7 @@ const deleteMySlot = catchAsync(async (req, res) => {
 export const StaffController = {
   getMyProfile,
   updateMyProfile,
+  uploadMyPhoto,
   uploadMyVerificationDocument,
   listMyBookings,
   listMyTrips,
