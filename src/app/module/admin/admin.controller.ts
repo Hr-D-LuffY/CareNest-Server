@@ -121,6 +121,16 @@ const listUsers = catchAsync(async (req, res) => {
   })
 })
 
+const getUser = catchAsync(async (req, res) => {
+  const user = await AdminService.getUser(idParamSchema.parse(req.params).id)
+
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    message: 'User retrieved successfully',
+    data: user,
+  })
+})
+
 const updateUserRole = catchAsync(async (req, res) => {
   const payload = updateUserRoleSchema.parse(req.body)
   const user = await AdminService.updateUserRole(
@@ -146,5 +156,6 @@ export const AdminController = {
   getDashboardStats,
   listAuditLogs,
   listUsers,
+  getUser,
   updateUserRole,
 }

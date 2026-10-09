@@ -16,6 +16,7 @@ router.get('/dashboard-stats', auth(Role.ADMIN), AdminController.getDashboardSta
 router.get('/audit-logs', auth(Role.ADMIN), AdminController.listAuditLogs)
 
 router.get('/users', auth(Role.ADMIN), AdminController.listUsers)
+router.get('/users/:id', auth(Role.ADMIN), AdminController.getUser)
 router.patch('/users/:id/role', auth(Role.ADMIN), AdminController.updateUserRole)
 
 export const AdminRoutes = router

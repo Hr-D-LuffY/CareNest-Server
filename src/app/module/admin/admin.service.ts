@@ -13,6 +13,7 @@ import { config } from '../../config'
 import { AppError } from '../../errorHelpers/AppError'
 import { ACTIVE_BOOKING_STATUSES } from '../../lib/booking-guards'
 import { prisma } from '../../lib/prisma'
+import { toIsoDate } from '../../utils/date'
 import type { TokenPayload } from '../../utils/jwt'
 import { buildMeta, getPagination } from '../../utils/pagination'
 import { attachSeatsLeft } from '../room/room.service'
@@ -351,6 +352,88 @@ const listUsers = async (query: ListUsersQuery) => {
   return { items, meta: buildMeta(query, total) }
 }
 
+const RECENT_GUARDIAN_BOOKINGS = 5
+
+// One account with the profile behind its role, for the admin's "view profile". A guardian comes
+// with the children (medical and emergency details included, since child records are otherwise
+// readable only by their own guardian), a count of bookings per status and the newest bookings; a staff member comes
+// with the id and status of their staff profile (the rest lives under GET /admin/staff/:id).
+const getUser = async (userId: string) => {
+  const user = await prisma.user.findFirst({
+    where: { id: userId, isDeleted: false },
+    select: {
+      ...userSelect,
+      guardianProfile: {
+        select: {
+          id: true,
+          phone: true,
+          address: true,
+          walletBalance: true,
+          children: {
+            where: { isDeleted: false },
+            select: {
+              id: true,
+              name: true,
+              tier: true,
+              dateOfBirth: true,
+              profilePhoto: true,
+              allergies: true,
+              conditions: true,
+              emergencyContactName: true,
+              emergencyContactPhone: true,
+              createdAt: true,
+            },
+            orderBy: { createdAt: 'asc' },
+          },
+        },
+      },
+      staffProfile: {
+        select: { id: true, staffType: true, verificationStatus: true },
+      },
+    },
+  })
+  if (!user) throw new AppError(httpStatus.NOT_FOUND, USER_NOT_FOUND_MESSAGE)
+
+  const { guardianProfile, ...account } = user
+  if (!guardianProfile) return { ...account, guardianProfile: null }
+
+  const [statusGroups, recent] = await Promise.all([
+    prisma.booking.groupBy({
+      by: ['status'],
+      where: { guardianId: guardianProfile.id },
+      _count: { _all: true },
+    }),
+    prisma.booking.findMany({
+      where: { guardianId: guardianProfile.id },
+      select: {
+        id: true,
+        sessionDate: true,
+        status: true,
+        estimatedFee: true,
+        finalFee: true,
+        child: { select: { id: true, name: true } },
+        room: { select: { id: true, name: true } },
+      },
+      orderBy: [{ sessionDate: 'desc' }, { id: 'desc' }],
+      take: RECENT_GUARDIAN_BOOKINGS,
+    }),
+  ])
+
+  return {
+    ...account,
+    guardianProfile: {
+      ...guardianProfile,
+      bookingsByStatus: Object.fromEntries(
+        statusGroups.map((group) => [group.status, group._count._all]),
+      ),
+      recentBookings: recent.map((booking) => ({
+        ...booking,
+        sessionDate: toIsoDate(booking.sessionDate),
+      })),
+    },
+  }
+}
+
 // Corrective role changes only, logged to the audit trail.
 // ADMIN is off-limits in both directions — it's seed-only (AGENTS.md) — and the destination
 // profile (GuardianProfile/StaffProfile) must already exist, so this can never leave a user with
@@ -410,5 +493,6 @@ export const AdminService = {
   getDashboardStats,
   listAuditLogs,
   listUsers,
+  getUser,
   updateUserRole,
 }
