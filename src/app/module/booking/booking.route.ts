@@ -16,3 +16,10 @@ router.post('/:id/check-in', auth(Role.STAFF), BookingController.checkIn)
 router.post('/:id/check-out', auth(Role.STAFF), BookingController.checkOut)
 
 export const BookingRoutes = router
+
+const roomRouter = Router()
+
+// Mounted under /room, so this is GET /room/:id/bookings.
+roomRouter.get('/:id/bookings', auth(Role.STAFF, Role.ADMIN), BookingController.listRoomBookings)
+
+export const RoomBookingRoutes = roomRouter

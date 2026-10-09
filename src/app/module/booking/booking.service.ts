@@ -2,6 +2,7 @@ import httpStatus from 'http-status'
 import type { Prisma } from '../../../generated/prisma/client'
 import {
   BookingStatus,
+  Role,
   TransportStatus,
   WalletTransactionType,
 } from '../../../generated/prisma/enums'
@@ -17,14 +18,20 @@ import { CHILD_NOT_FOUND_MESSAGE, getGuardianId } from '../child/child.service'
 import {
   attachSeatsLeft,
   invalidateSeatsCache,
+  nextSessionDate,
   ROOM_NOT_FOUND_MESSAGE,
+  startOfUtcDay,
   todayUtc,
   toSessionDate,
   WEEKDAYS,
 } from '../room/room.service'
 import { getMySitterId } from '../staff/staff.service'
 import { joinWaitlist, promoteFromWaitlist } from '../waitlist/waitlist.service'
-import type { CreateBookingPayload, ListBookingsQuery } from './booking.interface'
+import type {
+  CreateBookingPayload,
+  ListBookingsQuery,
+  ListRoomBookingsQuery,
+} from './booking.interface'
 
 type Caller = Pick<TokenPayload, 'userId'>
 
@@ -167,6 +174,59 @@ const listMyBookings = async (caller: Caller, query: ListBookingsQuery) => {
     prisma.booking.count({ where }),
   ])
   return { items: items.map(toBookingView), meta: buildMeta(query, total) }
+}
+
+const roomRosterSelect = {
+  id: true,
+  sessionDate: true,
+  status: true,
+  estimatedFee: true,
+  finalFee: true,
+  insufficientBalance: true,
+  createdAt: true,
+  child: { select: { id: true, name: true, tier: true, profilePhoto: true } },
+  guardian: { select: { id: true, phone: true, user: { select: { name: true } } } },
+  checkinLog: { select: { checkInAt: true, checkOutAt: true } },
+} as const
+
+// Who holds a seat in one session of a room. Staff see the rooms they run, admins see any room;
+// someone else's room gets the same 404 as a missing one. Without `date` it is the next session.
+const listRoomBookings = async (
+  caller: Pick<TokenPayload, 'userId' | 'role'>,
+  roomId: string,
+  query: ListRoomBookingsQuery,
+) => {
+  const room = await prisma.room.findFirst({
+    where: { id: roomId, isDeleted: false },
+    select: { dayOfWeek: true, staff: { select: { userId: true } } },
+  })
+  const canView = room && (caller.role === Role.ADMIN || room.staff.userId === caller.userId)
+  if (!canView) throw new AppError(httpStatus.NOT_FOUND, ROOM_NOT_FOUND_MESSAGE)
+
+  const sessionDate = query.date ? startOfUtcDay(query.date) : nextSessionDate(room.dayOfWeek)
+  if (WEEKDAYS[sessionDate.getUTCDay()] !== room.dayOfWeek) {
+    throw new AppError(httpStatus.BAD_REQUEST, `This room runs on ${room.dayOfWeek}s`)
+  }
+
+  const where: Prisma.BookingWhereInput = {
+    roomId,
+    sessionDate,
+    ...(query.status && { status: query.status }),
+  }
+  const [items, total] = await Promise.all([
+    prisma.booking.findMany({
+      where,
+      select: roomRosterSelect,
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      ...getPagination(query),
+    }),
+    prisma.booking.count({ where }),
+  ])
+  const views = items.map((booking) => ({
+    ...booking,
+    sessionDate: toIsoDate(booking.sessionDate),
+  }))
+  return { items: views, meta: buildMeta(query, total) }
 }
 
 // Someone else's booking gets the same 404 as a missing one, so ids can't be probed.
@@ -387,6 +447,7 @@ const checkOut = async (caller: Caller, bookingId: string) => {
 export const BookingService = {
   createBooking,
   listMyBookings,
+  listRoomBookings,
   getMyBooking,
   cancelBooking,
   checkIn,

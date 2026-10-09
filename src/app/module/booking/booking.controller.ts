@@ -3,7 +3,11 @@ import { catchAsync } from '../../utils/catchAsync'
 import { getAuthUser } from '../../utils/getAuthUser'
 import { sendResponse } from '../../utils/sendResponse'
 import { idParamSchema } from '../../utils/validation'
-import { createBookingSchema, listBookingsQuerySchema } from './booking.interface'
+import {
+  createBookingSchema,
+  listBookingsQuerySchema,
+  listRoomBookingsQuerySchema,
+} from './booking.interface'
 import { BookingService } from './booking.service'
 
 const createBooking = catchAsync(async (req, res) => {
@@ -33,6 +37,22 @@ const listMyBookings = catchAsync(async (req, res) => {
   sendResponse(res, {
     statusCode: httpStatus.OK,
     message: 'Bookings retrieved successfully',
+    data: items,
+    meta,
+  })
+})
+
+const listRoomBookings = catchAsync(async (req, res) => {
+  const query = listRoomBookingsQuerySchema.parse(req.query)
+  const { items, meta } = await BookingService.listRoomBookings(
+    getAuthUser(req),
+    idParamSchema.parse(req.params).id,
+    query,
+  )
+
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    message: 'Room bookings retrieved successfully',
     data: items,
     meta,
   })
@@ -87,6 +107,7 @@ const checkOut = catchAsync(async (req, res) => {
 export const BookingController = {
   createBooking,
   listMyBookings,
+  listRoomBookings,
   getMyBooking,
   cancelBooking,
   checkIn,

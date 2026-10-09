@@ -13,7 +13,10 @@ import { notFound } from "./app/middleware/notFound";
 // import { rateLimiter } from "./app/middleware/rateLimiter";
 import { AdminRoutes } from "./app/module/admin/admin.route";
 import { AuthRoutes } from "./app/module/auth/auth.route";
-import { BookingRoutes } from "./app/module/booking/booking.route";
+import {
+  BookingRoutes,
+  RoomBookingRoutes,
+} from "./app/module/booking/booking.route";
 import { ChildRoutes } from "./app/module/child/child.route";
 import { GuardianRoutes } from "./app/module/guardian/guardian.route";
 import { PaymentRoutes } from "./app/module/payment/payment.route";
@@ -80,6 +83,7 @@ app.use("/api/v1/guardian", GuardianRoutes);
 app.use("/api/v1/child", ChildRoutes);
 app.use("/api/v1/room", RoomRoutes);
 app.use("/api/v1/room", WaitlistRoutes);
+app.use("/api/v1/room", RoomBookingRoutes);
 app.use("/api/v1/booking", BookingRoutes);
 app.use("/api/v1/payment", PaymentRoutes);
 app.use("/api/v1/wallet", WalletRoutes);

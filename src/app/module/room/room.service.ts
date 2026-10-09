@@ -201,7 +201,7 @@ const assertCapacityFits = async (roomId: string, capacity: number) => {
 
 // A room repeats weekly: its next session is the first date from today (inclusive) that falls on
 // the room's day of the week.
-const nextSessionDate = (dayOfWeek: DayOfWeek) => {
+export const nextSessionDate = (dayOfWeek: DayOfWeek) => {
   const today = todayUtc();
   const daysAhead =
     (WEEKDAYS.indexOf(dayOfWeek) - today.getUTCDay() + DAYS_IN_WEEK) %

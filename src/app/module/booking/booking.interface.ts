@@ -14,5 +14,14 @@ export const listBookingsQuerySchema = z.object({
   status: z.enum(BookingStatus).optional(),
 })
 
+export const listRoomBookingsQuerySchema = z.object({
+  ...paginationQueryShape,
+  // One session of the room (YYYY-MM-DD, past dates allowed so old sessions can be reviewed);
+  // without it, the room's next session.
+  date: z.coerce.date({ error: 'Date must be a valid date, e.g. 2026-09-21' }).optional(),
+  status: z.enum(BookingStatus).optional(),
+})
+
 export type CreateBookingPayload = z.infer<typeof createBookingSchema>
 export type ListBookingsQuery = z.infer<typeof listBookingsQuerySchema>
+export type ListRoomBookingsQuery = z.infer<typeof listRoomBookingsQuerySchema>
