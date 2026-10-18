@@ -8,6 +8,7 @@ import { globalErrorHandler } from "./app/middleware/globalErrorHandler";
 import { notFound } from "./app/middleware/notFound";
 import { rateLimiter } from "./app/middleware/rateLimiter";
 import { AdminRoutes } from "./app/module/admin/admin.route";
+import { AiRoutes } from "./app/module/ai/ai.route";
 import { AuthRoutes } from "./app/module/auth/auth.route";
 import {
   BookingRoutes,
@@ -40,6 +41,10 @@ const GENERAL_RATE_LIMIT = {
 // much tighter cap than general API traffic. 100 leaves room for several people trying the demo
 // logins from one network (an evaluation, a classroom) without opening the door to guessing.
 const AUTH_RATE_LIMIT = { windowSeconds: FIFTEEN_MINUTES_IN_SECONDS, max: 100 };
+
+// AI routes cost real provider quota, so they get a much tighter per-IP cap than general traffic.
+// The gateway also keeps its own daily budget per provider.
+const AI_RATE_LIMIT = { windowSeconds: FIFTEEN_MINUTES_IN_SECONDS, max: 30 };
 
 const app = express();
 
@@ -86,6 +91,7 @@ app.use("/api/v1/staff", StaffRoutes);
 app.use("/api/v1/staff", StaffRatingRoutes);
 app.use("/api/v1/rating", RatingRoutes);
 app.use("/api/v1/admin", AdminRoutes);
+app.use("/api/v1/ai", rateLimiter({ ...AI_RATE_LIMIT, keyPrefix: "ai" }), AiRoutes);
 
 app.use(notFound);
 app.use(globalErrorHandler);

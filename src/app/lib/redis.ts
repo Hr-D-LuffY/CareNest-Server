@@ -71,3 +71,24 @@ export const redisIncrWithExpiry = async (
     return null
   }
 }
+
+// Same idea as redisIncrWithExpiry, but adds `amount` instead of 1 (for token counters). The expiry
+// is set when the counter is created, i.e. when the new total equals the amount just added.
+export const redisIncrByWithExpiry = async (
+  key: string,
+  amount: number,
+  ttlSeconds: number,
+): Promise<number | null> => {
+  try {
+    const connected = await getConnectedClient()
+    if (!connected) return null
+    const total = await connected.incrBy(key, amount)
+    if (total === amount) {
+      await connected.expire(key, ttlSeconds)
+    }
+    return total
+  } catch (error) {
+    console.error(`Redis incrBy(${key}) failed, this usage will not be counted:`, error)
+    return null
+  }
+}
