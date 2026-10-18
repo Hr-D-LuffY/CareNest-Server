@@ -21,6 +21,7 @@ When a room is full, a booking request doesn't fail — it joins a waitlist rank
 - **Supervised transport booking** tied to an existing care session, with trip start/end logging and automatic fare deduction
 - **Redis-backed seat-availability caching and API rate limiting**, with automatic fail-open behavior if Redis is unavailable
 - **Ratings, admin analytics, and a full audit log** covering staff verification, role changes, booking status changes, and wallet movements
+- **AI care assistant and admin insights** — Guardians chat with a read-only assistant that looks up rooms, seats, children, bookings, waitlist and wallet; Admins get an insights briefing where rules find the anomalies and a model only writes the narrative. Three free providers (Gemini, Groq, OpenRouter) with automatic failover
 - **Soft deletes throughout** — guardians, children, rooms, and staff profiles are deactivated, never destroyed, so financial and medical history is preserved
 
 ## Tech Stack
@@ -35,6 +36,7 @@ When a room is full, a booking request doesn't fail — it joins a waitlist rank
 | Authentication | JWT (access + refresh tokens), Google OAuth |
 | Caching & Rate Limiting | Redis |
 | Payments | bKash Tokenized Checkout |
+| AI | Gemini, Groq and OpenRouter free tiers, called with `fetch` through their OpenAI-compatible chat-completions endpoints |
 | File Storage | Cloudinary, Multer |
 | Security | Helmet, bcrypt, CORS |
 | Linting & Formatting | Biome |
@@ -93,6 +95,12 @@ Set these in `.env` (see `.env.example` for the full template):
 | `BKASH_CALLBACK_URL` | Publicly reachable URL bKash redirects to after checkout |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google OAuth credentials |
 | `CLOUDINARY_URL` | Cloudinary connection string for file uploads |
+| `AI_PROVIDER_ORDER` | Failover order, default `gemini,groq,openrouter`. Providers without a key are skipped (optional) |
+| `AI_REQUEST_TIMEOUT_MS` | Per-request timeout for an AI provider, default `20000` |
+| `GEMINI_API_KEY` / `GEMINI_MODEL` | Google AI Studio key and model (default `gemini-3.5-flash-lite`) |
+| `GROQ_API_KEY` / `GROQ_MODEL` | Groq key and model (default `openai/gpt-oss-120b`) |
+| `OPENROUTER_API_KEY` / `OPENROUTER_MODEL` | OpenRouter key and a `:free` model that supports tools (default `nvidia/nemotron-3-super-120b-a12b:free`) |
+| `<PROVIDER>_DAILY_REQUESTS` / `<PROVIDER>_DAILY_TOKENS` | Optional, for `GEMINI`, `GROQ` and `OPENROUTER`: the most the server lets itself use per UTC day, set a little under the real free-tier quota. Tracked in Redis (not enforced without it) |
 
 ### Running the Project
 
@@ -149,6 +157,37 @@ All routes are versioned under `/api/v1` and require a `Authorization: Bearer <t
 | Rating | `POST /rating`, `GET /staff/:id/ratings` |
 | Wallet & Payment | `GET /wallet/transactions`, `POST /payment/top-up`, `GET /payment/bkash/callback` |
 | Admin | `POST /admin/staff`, `PATCH /admin/staff/:id/verify`, `GET /admin/dashboard-stats`, `GET /admin/audit-logs` |
+| AI | `POST /ai/chat` (Guardian), `GET /ai/insights?refresh=` (Admin), `GET /ai/status` (Admin) |
+
+### AI Features
+
+Two features share one gateway. Every provider is called with `fetch` through its OpenAI-compatible `POST /chat/completions`, so no extra npm packages are needed.
+
+| Feature | Who | Endpoint |
+|---|---|---|
+| Care assistant (chat with tool calling, read-only) | Guardian | `POST /ai/chat` with `{ "messages": [{ "role": "user", "content": "..." }] }` returns `{ reply, rooms[], links[], provider }` |
+| AI Insights (anomaly detection plus narrative) | Admin | `GET /ai/insights` (cached 15 minutes; `?refresh=true` regenerates, limited to 5 per 15 minutes) returns `{ generatedAt, source, provider, headline, summary, recommendations[], anomalies[], metrics }` |
+| Provider health | Admin | `GET /ai/status` returns each provider's model, whether it is configured and healthy, and its usage today against the daily limit |
+
+- **Failover:** providers are tried in `AI_PROVIDER_ORDER`. A provider is skipped on a timeout, network error, 429, 5xx or an unusable answer, and for 60 seconds after a failure. A rejected API key switches that provider off until the server restarts. Daily request and token budgets per provider are counted in Redis.
+- **No key, no problem:** every AI key is optional. With none set, the AI routes answer `503` and the rest of the API runs normally.
+- **The assistant can only look things up.** Its tools (`search_rooms`, `get_my_children`, `get_my_bookings`, `get_my_waitlist`, `get_wallet`) call the same services as the REST API, scoped to the logged-in Guardian. It cannot book, cancel or pay. `rooms[]` and `links[]` (booking page links) are built by the server from tool results; the model never writes a URL or an id. Input is capped at the last 10 messages of 500 characters each.
+- **Insights: rules find, the model explains.** Anomalies come from plain statistics over the last 28 days versus the 28 before: cancellation spike, repeat canceller, staff rating drop, revenue drop, wallet shortfalls, room demand and stale verification. The model only turns those findings into a short briefing. If no provider can answer, `source` is `RULES` and a template writes the briefing from the same findings, so the card never fails because AI is down.
+- **Privacy:** free tiers may log prompts. The assistant only ever sees a child's first name, tier and age (never allergies, conditions, emergency contacts, phone, email or date of birth). The insights prompt contains aggregated numbers and anomaly types only, with no guardian names.
+- **Deployment:** set `GEMINI_API_KEY`, `GROQ_API_KEY` and `OPENROUTER_API_KEY` (and the model and daily limits) on the backend host only (Render). They must never be set on the frontend host or given a `NEXT_PUBLIC_` prefix.
+- **Demo data:** insights are computed from real bookings, cancellations and ratings, so a freshly seeded database has little to flag. Use the app for a while, or the Postman collection, to build up history.
+
+```bash
+# Ask the care assistant (Guardian token)
+curl -X POST http://localhost:5000/api/v1/ai/chat \
+  -H "Authorization: Bearer <guardian-access-token>" \
+  -H "Content-Type: application/json" \
+  -d '{ "messages": [{ "role": "user", "content": "Which rooms have seats this Monday?" }] }'
+
+# Admin insights, forcing a fresh run
+curl "http://localhost:5000/api/v1/ai/insights?refresh=true" \
+  -H "Authorization: Bearer <admin-access-token>"
+```
 
 ### Example: Register a Guardian
 
@@ -221,6 +260,7 @@ src/
 └── app/
     ├── config/              # Env var loading and validation (Zod)
     ├── lib/                 # Shared singletons: Prisma client, Redis, Cloudinary, fare/wallet logic
+    │   └── ai/              # AI gateway (failover, circuit breaker, budgets), provider client, assistant tools, anomaly rules
     ├── middleware/           # Auth guard, rate limiter, error handler, upload handling
     ├── utils/                # catchAsync, JWT helpers, pagination, response envelope
     └── module/
@@ -234,6 +274,7 @@ src/
         ├── payment/          # bKash top-up and callback
         ├── transport/        # Vehicles and transport bookings
         ├── rating/           # Staff ratings
+        ├── ai/               # Care assistant chat, admin insights, provider status
         └── admin/            # Staff verification, analytics, audit logs
 
 prisma/
