@@ -1,7 +1,20 @@
 import httpStatus from 'http-status'
+import {
+  BookingStatus,
+  VerificationStatus,
+  WaitlistStatus,
+  WalletTransactionType,
+} from '../../../generated/prisma/enums'
 import { AppError } from '../../errorHelpers/AppError'
 import type { ChatMessage, ChatResult } from '../../lib/ai/ai.types'
 import { aiGateway } from '../../lib/ai/ai-gateway.service'
+import {
+  type InsightMetrics,
+  type PeriodComparison,
+  REPEAT_CANCELLER_MIN,
+  type RoomDemand,
+  type StaffRatingWindow,
+} from '../../lib/ai/anomaly-rules'
 import {
   ASSISTANT_TOOL_DEFINITIONS,
   type AssistantCaller,
@@ -9,7 +22,9 @@ import {
   isUsableToolCall,
   runAssistantTool,
 } from '../../lib/ai/assistant-tools'
+import { prisma } from '../../lib/prisma'
 import { toIsoDate } from '../../utils/date'
+import { startOfUtcDay, WEEKDAYS } from '../room/room.service'
 import { type ChatPayload, MAX_CHAT_MESSAGES } from './ai.interface'
 
 // Tool rounds the model gets before it has to answer with what it has.
@@ -129,4 +144,253 @@ const chat = async (caller: AssistantCaller, { messages }: ChatPayload): Promise
   return finish(last)
 }
 
-export const AiService = { chat }
+// ---- Insight metrics -----------------------------------------------------------------------------
+// Every query the admin insights need lives here, so the rules stay free of Prisma. Windows end at
+// the start of today (UTC), so each one is made of complete days and two runs on the same day agree.
+
+const MS_PER_DAY = 24 * 60 * 60 * 1000
+const WINDOW_DAYS = 28
+const WEEK_DAYS = 7
+const REPEAT_CANCELLER_WINDOW_DAYS = 30
+const ROOM_HISTORY_SESSIONS = 4
+const REVENUE_TYPES = [WalletTransactionType.CARE_FEE, WalletTransactionType.TRANSPORT_FARE]
+const SEATED_STATUSES = [BookingStatus.PENDING, BookingStatus.CONFIRMED, BookingStatus.COMPLETED]
+
+const daysBefore = (date: Date, days: number) => new Date(date.getTime() - days * MS_PER_DAY)
+
+interface Range {
+  gte: Date
+  lt: Date
+}
+
+const rangeOf = (today: Date, fromDaysAgo: number, toDaysAgo: number): Range => ({
+  gte: daysBefore(today, fromDaysAgo),
+  lt: daysBefore(today, toDaysAgo),
+})
+
+const sumRevenue = async (range: Range) => {
+  const { _sum } = await prisma.walletTransaction.aggregate({
+    where: { type: { in: REVENUE_TYPES }, createdAt: range },
+    _sum: { amount: true },
+  })
+  return _sum.amount?.toNumber() ?? 0
+}
+
+const countBookingsCreated = (range: Range) => prisma.booking.count({ where: { createdAt: range } })
+
+const countCancellations = (range: Range) =>
+  prisma.booking.count({ where: { status: BookingStatus.CANCELLED, cancelledAt: range } })
+
+// The last `days` complete days against the `days` before them.
+const compare = async (
+  today: Date,
+  measure: (range: Range) => Promise<number>,
+  days: number,
+): Promise<PeriodComparison> => {
+  const [current, previous] = await Promise.all([
+    measure(rangeOf(today, days, 0)),
+    measure(rangeOf(today, days * 2, days)),
+  ])
+  return { current, previous }
+}
+
+const collectDailyCancellations = async (today: Date) => {
+  const cancelled = await prisma.booking.findMany({
+    where: { status: BookingStatus.CANCELLED, cancelledAt: rangeOf(today, WINDOW_DAYS, 0) },
+    select: { cancelledAt: true },
+  })
+  const perDay = new Map<string, number>()
+  for (const { cancelledAt } of cancelled) {
+    if (!cancelledAt) continue
+    const day = toIsoDate(cancelledAt)
+    perDay.set(day, (perDay.get(day) ?? 0) + 1)
+  }
+  return Array.from({ length: WINDOW_DAYS }, (_unused, index) => {
+    const date = toIsoDate(daysBefore(today, WINDOW_DAYS - index))
+    return { date, count: perDay.get(date) ?? 0 }
+  })
+}
+
+const collectRepeatCancellers = async (now: Date) => {
+  const grouped = await prisma.booking.groupBy({
+    by: ['guardianId'],
+    where: {
+      status: BookingStatus.CANCELLED,
+      cancelledAt: { gte: daysBefore(now, REPEAT_CANCELLER_WINDOW_DAYS) },
+    },
+    _count: { _all: true },
+    having: { guardianId: { _count: { gte: REPEAT_CANCELLER_MIN } } },
+  })
+  if (grouped.length === 0) return []
+
+  const guardians = await prisma.guardianProfile.findMany({
+    where: { id: { in: grouped.map(({ guardianId }) => guardianId) } },
+    select: { id: true, userId: true },
+  })
+  const userById = new Map(guardians.map(({ id, userId }) => [id, userId]))
+  return grouped.flatMap(({ guardianId, _count }) => {
+    const userId = userById.get(guardianId)
+    return userId ? [{ userId, cancellations: _count._all }] : []
+  })
+}
+
+const average = (scores: number[]) =>
+  scores.length === 0 ? 0 : scores.reduce((sum, score) => sum + score, 0) / scores.length
+
+const collectStaffRatings = async (today: Date): Promise<StaffRatingWindow[]> => {
+  const split = daysBefore(today, WINDOW_DAYS)
+  const ratings = await prisma.rating.findMany({
+    where: { createdAt: { gte: daysBefore(today, WINDOW_DAYS * 2), lt: today } },
+    select: { staffId: true, score: true, createdAt: true },
+  })
+
+  const scoresByStaff = new Map<string, { current: number[]; previous: number[] }>()
+  for (const { staffId, score, createdAt } of ratings) {
+    const entry = scoresByStaff.get(staffId) ?? { current: [], previous: [] }
+    entry[createdAt >= split ? 'current' : 'previous'].push(score)
+    scoresByStaff.set(staffId, entry)
+  }
+  if (scoresByStaff.size === 0) return []
+
+  const staff = await prisma.staffProfile.findMany({
+    where: { id: { in: [...scoresByStaff.keys()] }, isDeleted: false },
+    select: { id: true, user: { select: { name: true } } },
+  })
+  return staff.flatMap(({ id, user }) => {
+    const scores = scoresByStaff.get(id)
+    if (!scores) return []
+    return [
+      {
+        staffId: id,
+        name: user.name,
+        currentAverage: average(scores.current),
+        currentCount: scores.current.length,
+        previousAverage: average(scores.previous),
+        previousCount: scores.previous.length,
+      },
+    ]
+  })
+}
+
+// The dates (oldest first) a weekly room ran in the last 28 days: always four of them.
+const recentSessionDates = (today: Date, dayOfWeek: string) =>
+  Array.from({ length: WINDOW_DAYS }, (_unused, index) => daysBefore(today, WINDOW_DAYS - index))
+    .filter((date) => WEEKDAYS[date.getUTCDay()] === dayOfWeek)
+    .slice(-ROOM_HISTORY_SESSIONS)
+
+const collectRoomDemand = async (today: Date): Promise<RoomDemand[]> => {
+  const [rooms, seated, waiting] = await Promise.all([
+    prisma.room.findMany({
+      where: { isDeleted: false },
+      select: { id: true, name: true, capacity: true, dayOfWeek: true, createdAt: true },
+    }),
+    prisma.booking.groupBy({
+      by: ['roomId', 'sessionDate'],
+      where: { status: { in: SEATED_STATUSES }, sessionDate: rangeOf(today, WINDOW_DAYS, 0) },
+      _count: { _all: true },
+    }),
+    prisma.waitlistEntry.groupBy({
+      by: ['roomId'],
+      where: { status: WaitlistStatus.PENDING, sessionDate: { gte: today } },
+      _count: { _all: true },
+    }),
+  ])
+
+  const bookedBySession = new Map(
+    seated.map(({ roomId, sessionDate, _count }) => [
+      `${roomId}|${toIsoDate(sessionDate)}`,
+      _count._all,
+    ]),
+  )
+  const waitingByRoom = new Map(waiting.map(({ roomId, _count }) => [roomId, _count._all]))
+
+  return rooms.map((room) => ({
+    id: room.id,
+    name: room.name,
+    capacity: room.capacity,
+    ageDays: Math.floor((today.getTime() - room.createdAt.getTime()) / MS_PER_DAY),
+    sessions: recentSessionDates(today, room.dayOfWeek).map((date) => ({
+      date: toIsoDate(date),
+      booked: bookedBySession.get(`${room.id}|${toIsoDate(date)}`) ?? 0,
+    })),
+    waitlistPending: waitingByRoom.get(room.id) ?? 0,
+  }))
+}
+
+const collectPendingVerifications = async (now: Date) => {
+  const pending = await prisma.staffProfile.findMany({
+    where: {
+      isDeleted: false,
+      user: { isDeleted: false },
+      verificationStatus: VerificationStatus.UNVERIFIED,
+    },
+    select: { id: true, createdAt: true, user: { select: { name: true } } },
+  })
+  return pending.map(({ id, createdAt, user }) => ({
+    staffId: id,
+    name: user.name,
+    waitingDays: Math.floor((now.getTime() - createdAt.getTime()) / MS_PER_DAY),
+  }))
+}
+
+// The numbers the anomaly rules and the insights narrative are built from.
+const collectInsightMetrics = async (now = new Date()): Promise<InsightMetrics> => {
+  const today = startOfUtcDay(now)
+  const lastWindow = rangeOf(today, WINDOW_DAYS, 0)
+
+  const [
+    bookings,
+    cancellations,
+    revenue,
+    completedCheckouts,
+    insufficientBalanceCheckouts,
+    dailyCancellations,
+    weeklyCancellations,
+    weeklyRevenue,
+    repeatCancellers,
+    staffRatings,
+    rooms,
+    pendingVerifications,
+  ] = await Promise.all([
+    compare(today, countBookingsCreated, WINDOW_DAYS),
+    compare(today, countCancellations, WINDOW_DAYS),
+    compare(today, sumRevenue, WINDOW_DAYS),
+    prisma.booking.count({
+      where: { status: BookingStatus.COMPLETED, checkinLog: { checkOutAt: lastWindow } },
+    }),
+    prisma.booking.count({
+      where: {
+        status: BookingStatus.COMPLETED,
+        insufficientBalance: true,
+        checkinLog: { checkOutAt: lastWindow },
+      },
+    }),
+    collectDailyCancellations(today),
+    compare(today, countCancellations, WEEK_DAYS),
+    compare(today, sumRevenue, WEEK_DAYS),
+    collectRepeatCancellers(now),
+    collectStaffRatings(today),
+    collectRoomDemand(today),
+    collectPendingVerifications(now),
+  ])
+
+  return {
+    asOf: now.toISOString(),
+    overview: {
+      bookings,
+      cancellations,
+      revenue,
+      completedCheckouts,
+      insufficientBalanceCheckouts,
+    },
+    dailyCancellations,
+    weeklyCancellations,
+    weeklyRevenue,
+    repeatCancellers,
+    staffRatings,
+    rooms,
+    pendingVerifications,
+  }
+}
+
+export const AiService = { chat, collectInsightMetrics }
