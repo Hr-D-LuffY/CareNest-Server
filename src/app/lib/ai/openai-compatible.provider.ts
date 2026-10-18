@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import type { AiProviderConfig, AiProviderName } from '../../config'
-import { AiProviderError, type AiFailureKind } from './ai.errors'
+import { type AiFailureKind, AiProviderError } from './ai.errors'
 import type { AiProvider, ChatMessage, ChatRequest, ChatResult, ToolCall } from './ai.types'
 
 const DEFAULT_MAX_TOKENS = 1024
@@ -8,6 +8,7 @@ const DEFAULT_TEMPERATURE = 0.2
 const MAX_ERROR_DETAIL_LENGTH = 200
 const MS_PER_SECOND = 1000
 
+const HTTP_BAD_REQUEST = 400
 const HTTP_UNAUTHORIZED = 401
 const HTTP_FORBIDDEN = 403
 const HTTP_NOT_FOUND = 404
@@ -54,6 +55,13 @@ const errorBodySchema = z.object({
     code: z.union([z.number(), z.string()]).optional(),
   }),
 })
+
+// A few providers answer HTTP 400 for problems that are not our request:
+//   Groq    the model failed to produce valid JSON or a valid tool call
+//   Gemini  a wrong API key (it says 400 "API key not valid", not 401)
+// Treating those as bad requests would stop the failover that exists for exactly these cases.
+const MODEL_OUTPUT_ERROR_CODES = new Set(['json_validate_failed', 'tool_use_failed'])
+const API_KEY_ERROR = /api key/i
 
 type WireMessage =
   | { role: 'system' | 'user'; content: string }
@@ -105,6 +113,16 @@ const toWireMessage = (message: ChatMessage, target: AiProviderName): WireMessag
   return { role: message.role, content: message.content }
 }
 
+const isTimeout = (error: unknown) => error instanceof Error && error.name === 'TimeoutError'
+
+const parseJson = (text: string): unknown => {
+  try {
+    return JSON.parse(text)
+  } catch {
+    return null
+  }
+}
+
 const classifyStatus = (status: number): AiFailureKind => {
   if (status === HTTP_TOO_MANY_REQUESTS || status === HTTP_PAYLOAD_TOO_LARGE) return 'rate_limited'
   if (status === HTTP_UNAUTHORIZED || status === HTTP_FORBIDDEN) return 'auth'
@@ -112,6 +130,16 @@ const classifyStatus = (status: number): AiFailureKind => {
   if (status === HTTP_REQUEST_TIMEOUT || status >= HTTP_SERVER_ERROR) return 'server'
   // 400, 422 and anything unexpected: our request is wrong.
   return 'bad_request'
+}
+
+const classifyFailure = (status: number, payload: unknown): AiFailureKind => {
+  const parsed = errorBodySchema.safeParse(unwrapErrorPayload(payload))
+  if (parsed.success && status === HTTP_BAD_REQUEST) {
+    const { code, message } = parsed.data.error
+    if (MODEL_OUTPUT_ERROR_CODES.has(String(code))) return 'invalid_response'
+    if (message && API_KEY_ERROR.test(message)) return 'auth'
+  }
+  return classifyStatus(status)
 }
 
 // Retry-After is either a number of seconds or an HTTP date.
@@ -175,14 +203,21 @@ export const createOpenAiCompatibleProvider = (
         signal: AbortSignal.timeout(timeoutMs),
       })
     } catch (error) {
-      const timedOut = error instanceof Error && error.name === 'TimeoutError'
-      throw fail(timedOut ? 'timeout' : 'network')
+      throw fail(isTimeout(error) ? 'timeout' : 'network')
     }
 
-    const payload: unknown = await response.json().catch(() => null)
+    // The timeout covers reading the body too. OpenRouter answers the headers early and streams
+    // blank keep-alive lines until a slow model is done, so a timeout can land here.
+    let text: string
+    try {
+      text = await response.text()
+    } catch (error) {
+      throw fail(isTimeout(error) ? 'timeout' : 'network')
+    }
+    const payload = parseJson(text)
 
     if (!response.ok) {
-      throw fail(classifyStatus(response.status), {
+      throw fail(classifyFailure(response.status, payload), {
         status: response.status,
         retryAfterMs: parseRetryAfter(response.headers.get('retry-after')),
         detail: describeError(payload),

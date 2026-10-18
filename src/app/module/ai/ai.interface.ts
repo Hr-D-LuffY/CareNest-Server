@@ -29,3 +29,12 @@ export const chatSchema = z.object({
 })
 
 export type ChatPayload = z.infer<typeof chatSchema>
+
+export const insightsQuerySchema = z.object({
+  refresh: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
+})
+
+export type InsightsQuery = z.infer<typeof insightsQuerySchema>

@@ -76,6 +76,10 @@ const ageInYears = (dateOfBirth: Date, today = new Date()) => {
   return Math.max(0, Math.floor(months / MONTHS_PER_YEAR))
 }
 
+// Lists are cut short for the token limits. Saying how many exist lets the model tell the guardian
+// "showing 5 of 13" instead of presenting a partial list as the whole thing.
+const shownOf = (shown: number, total: number) => ({ shown, total })
+
 // Only here so TypeScript infers each tool's argument type from its own schema.
 const defineTool = <Schema extends z.ZodType>(tool: AssistantTool<Schema>) => tool
 
@@ -91,7 +95,7 @@ const searchRooms = defineTool({
     keyword: z.string().trim().min(1).max(50).optional().describe('Part of a room or sitter name'),
   }),
   run: async (_caller, { date, dayOfWeek, tier, availability, keyword }) => {
-    const { items } = await RoomService.listRooms({
+    const { items, meta } = await RoomService.listRooms({
       page: FIRST_PAGE,
       limit: MAX_ROOM_RESULTS,
       sortBy: 'startTime',
@@ -112,7 +116,7 @@ const searchRooms = defineTool({
       sessionDate: room.sessionDate,
       seatsLeft: room.seatsLeft,
     }))
-    return { data: { rooms }, rooms }
+    return { data: { rooms, ...shownOf(rooms.length, meta.total) }, rooms }
   },
 })
 
@@ -121,13 +125,14 @@ const getMyChildren = defineTool({
   description: "List the guardian's children (first name, tier and age only).",
   schema: z.object({}),
   run: async ({ userId }) => {
-    const { items } = await ChildService.listMyChildren(
+    const { items, meta } = await ChildService.listMyChildren(
       { userId },
       { page: FIRST_PAGE, limit: MAX_CHILDREN, sortBy: 'createdAt', sortOrder: 'asc' },
     )
     return {
       childIds: items.map((child) => child.id),
       data: {
+        ...shownOf(items.length, meta.total),
         children: items.map((child) => ({
           id: child.id,
           firstName: firstName(child.name),
@@ -144,12 +149,13 @@ const getMyBookings = defineTool({
   description: "List the guardian's most recent bookings, optionally only one status.",
   schema: z.object({ status: z.enum(BookingStatus).optional() }),
   run: async ({ userId }, { status }) => {
-    const { items } = await BookingService.listMyBookings(
+    const { items, meta } = await BookingService.listMyBookings(
       { userId },
       { page: FIRST_PAGE, limit: MAX_LIST_RESULTS, ...(status && { status }) },
     )
     return {
       data: {
+        ...shownOf(items.length, meta.total),
         bookings: items.map((booking) => ({
           id: booking.id,
           status: booking.status,
@@ -171,13 +177,14 @@ const getMyWaitlist = defineTool({
   description: "List the guardian's most recent waitlist entries, optionally only one status.",
   schema: z.object({ status: z.enum(WaitlistStatus).optional() }),
   run: async (caller, { status }) => {
-    const { items } = await WaitlistService.listMyWaitlist(caller, {
+    const { items, meta } = await WaitlistService.listMyWaitlist(caller, {
       page: FIRST_PAGE,
       limit: MAX_LIST_RESULTS,
       ...(status && { status }),
     })
     return {
       data: {
+        ...shownOf(items.length, meta.total),
         waitlist: items.map((entry) => ({
           status: entry.status,
           sessionDate: entry.sessionDate,
